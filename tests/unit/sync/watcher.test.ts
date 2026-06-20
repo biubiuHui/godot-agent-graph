@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -72,5 +72,15 @@ describe("watcher helpers", () => {
         withGraphLock(root, () => "nested");
       }),
     ).toThrow(/already locked/);
+  });
+
+  it("recovers from an empty stale graph lock", () => {
+    const root = tempProjectRoot();
+    mkdirSync(join(root, ".gdgraph"), { recursive: true });
+    const lockPath = join(root, ".gdgraph", "graph.lock");
+    writeFileSync(lockPath, "");
+
+    expect(withGraphLock(root, () => "recovered")).toBe("recovered");
+    expect(existsSync(lockPath)).toBe(false);
   });
 });

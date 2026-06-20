@@ -73,9 +73,9 @@ describe("resolver", () => {
     const root = indexedFixture("minimal");
     mkdirSync(join(root, "scenes"), { recursive: true });
     writeFileSync(
-      join(root, "scripts", "fixture_main_screen.gd"),
+      join(root, "scripts", "fixture_screen.gd"),
       `extends Node
-class_name FixtureScreenRoot
+class_name FixtureScreen
 `,
     );
     writeFileSync(
@@ -83,7 +83,7 @@ class_name FixtureScreenRoot
       `extends Node
 class_name NodePathCaller
 
-func inspect(screen: FixtureScreenRoot) -> void:
+func inspect(screen: FixtureScreen) -> void:
 \tscreen.get_node("RootLayout/CenterColumn/ContentPanel")
 `,
     );
@@ -91,9 +91,9 @@ func inspect(screen: FixtureScreenRoot) -> void:
       join(root, "fixture_main.tscn"),
       `[gd_scene load_steps=2 format=3 uid="uid://typednodepath"]
 
-[ext_resource type="Script" path="res://scripts/fixture_main_screen.gd" id="1_screen"]
+[ext_resource type="Script" path="res://scripts/fixture_screen.gd" id="1_screen"]
 
-[node name="FixtureScreenRoot" type="Node"]
+[node name="FixtureScreen" type="Node"]
 script = ExtResource("1_screen")
 
 [node name="RootLayout" type="Node" parent="."]

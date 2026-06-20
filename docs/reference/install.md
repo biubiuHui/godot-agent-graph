@@ -2,6 +2,22 @@
 
 `gdgraph install` writes MCP server configuration for supported Agent clients.
 
+Install the current public source build first:
+
+```bash
+git clone https://github.com/biubiuHui/godot-agent-graph.git
+cd godot-agent-graph
+npm install
+npm run build
+npm install -g .
+```
+
+After the package is published to npm, this can be replaced with:
+
+```bash
+npm install -g godot-agent-graph
+```
+
 ```bash
 gdgraph install /path/to/godot/project
 gdgraph uninstall /path/to/godot/project
