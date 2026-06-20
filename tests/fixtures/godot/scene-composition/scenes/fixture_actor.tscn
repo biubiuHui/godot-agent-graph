@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://compositionplayer"]
+
+[ext_resource type="Script" path="res://scripts/fixture_actor.gd" id="1_fixture_actor_script"]
+
+[node name="FixtureActor" type="CharacterBody2D"]
+script = ExtResource("1_fixture_actor_script")
+
+[node name="Sprite" type="Sprite2D" parent="."]

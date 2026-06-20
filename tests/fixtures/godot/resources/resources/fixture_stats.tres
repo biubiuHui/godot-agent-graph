@@ -1,0 +1,6 @@
+[gd_resource type="Resource" format=3 uid="uid://playerstats"]
+
+[resource]
+resource_name = "FixtureStats"
+health = 10
+speed = 120.0

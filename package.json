@@ -1,0 +1,40 @@
+{
+  "name": "godot-agent-graph",
+  "version": "0.1.0",
+  "description": "Agent-native static knowledge graph tooling for Godot projects.",
+  "type": "module",
+  "bin": {
+    "gdgraph": "./dist/bin/gdgraph.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "docs/reference",
+    "examples"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "copy-assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/db',{recursive:true});fs.copyFileSync('src/db/schema.sql','dist/db/schema.sql');fs.chmodSync('dist/bin/gdgraph.js',0o755)\"",
+    "build": "npm run clean && tsc -p tsconfig.json && npm run copy-assets",
+    "gdgraph": "tsx src/bin/gdgraph.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.11.1",
+    "commander": "^12.1.0",
+    "jsonc-parser": "^3.3.1",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-gdscript": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

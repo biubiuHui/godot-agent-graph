@@ -1,0 +1,4 @@
+[application]
+
+config/name="ResourcesFixture"
+run/main_scene="res://fixture_main.tscn"

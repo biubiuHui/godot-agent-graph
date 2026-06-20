@@ -1,0 +1,4 @@
+[application]
+
+config/name="SceneCompositionFixture"
+run/main_scene="res://scenes/fixture_main.tscn"

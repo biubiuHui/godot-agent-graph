@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://rootnotenotautoload"]
+
+[ext_resource type="Script" path="res://scripts/root_lookup.gd" id="1_root_lookup"]
+
+[node name="FixtureSaveService" type="Node"]
+script = ExtResource("1_root_lookup")

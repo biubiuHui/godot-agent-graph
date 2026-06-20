@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.gdgraph/
+docs/verification/
+coverage/
+.DS_Store
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+*.tar
+*.tgz

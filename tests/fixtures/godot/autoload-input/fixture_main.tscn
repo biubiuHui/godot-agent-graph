@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://autoloadinputmain"]
+
+[ext_resource type="Script" path="res://scripts/fixture_input.gd" id="1_fixture_input"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_fixture_input")

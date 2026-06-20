@@ -1,0 +1,18 @@
+; Engine configuration file.
+
+[application]
+config/name="RealisticFixture"
+run/main_scene="res://scenes/fixture_main.tscn"
+
+[autoload]
+FixtureState="*res://scripts/autoload/fixture_state.gd"
+
+[input]
+jump={
+"deadzone": 0.5,
+"events": []
+}
+interact={
+"deadzone": 0.5,
+"events": []
+}

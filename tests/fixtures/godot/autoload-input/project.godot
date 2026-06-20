@@ -1,0 +1,20 @@
+[application]
+
+config/name="AutoloadInputFixture"
+run/main_scene="res://fixture_main.tscn"
+
+[autoload]
+
+FixtureState="*res://scripts/fixture_state.gd"
+FixtureSaveService="*res://scripts/fixture_save_service.gd"
+
+[input]
+
+move_left={
+"deadzone": 0.5,
+"events": []
+}
+confirm={
+"deadzone": 0.5,
+"events": []
+}

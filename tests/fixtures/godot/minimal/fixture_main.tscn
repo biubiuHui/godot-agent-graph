@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://minimalmain"]
+
+[ext_resource type="Script" path="res://scripts/fixture_actor.gd" id="1_fixture_actor"]
+
+[node name="Main" type="Node2D"]
+
+[node name="FixtureActor" type="CharacterBody2D" parent="."]
+script = ExtResource("1_fixture_actor")
