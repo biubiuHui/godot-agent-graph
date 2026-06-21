@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createGraphDatabase } from "../../../src/db/index.js";
 import {
+  getProjectMetadata,
   getNode,
   listEdges,
   listUnresolvedRefs,
@@ -123,6 +124,25 @@ describe("indexGodotProject", () => {
       expect(searchNodes(graph, "FixtureActor").map((node) => node.id)).toEqual(
         expect.arrayContaining(["script:res://scripts/fixture_actor.gd"]),
       );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("stores index metadata as a project snapshot, not authoritative counts", () => {
+    const root = copyFixture("minimal");
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const metadata = getProjectMetadata(graph, "index");
+      expect(metadata?.value).toEqual({
+        project: expect.objectContaining({
+          name: "MinimalFixture",
+          mainScene: "res://fixture_main.tscn",
+        }),
+      });
     } finally {
       graph.close();
     }

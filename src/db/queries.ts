@@ -176,9 +176,35 @@ export function searchNodes(graph: GraphDatabase, query: string, limit = 20): Gr
     return [];
   }
 
-  const rows: NodeRow[] = [];
   const rowLimit = limit * 2;
-  const ftsQuery = queryToFtsMatch(trimmedQuery);
+  let rows = searchRows(graph, trimmedQuery, rowLimit);
+  let uniqueRows = filterSupersededRows(graph, uniqueRowsById(rows));
+
+  if (uniqueRows.length === 0) {
+    const tokens = queryToSearchTokens(trimmedQuery);
+    if (tokens.length > 1) {
+      rows = tokens.flatMap((token) => searchRows(graph, token, rowLimit));
+      uniqueRows = filterSupersededRows(graph, uniqueRowsById(rows));
+    }
+  }
+
+  return uniqueRows
+    .slice(0, limit)
+    .map(nodeFromRow);
+}
+
+function queryToFtsMatch(query: string): string {
+  const tokens = queryToSearchTokens(query);
+  return tokens.map((token) => `"${token.replace(/"/g, "\"\"")}"`).join(" ");
+}
+
+function queryToSearchTokens(query: string): string[] {
+  return query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+}
+
+function searchRows(graph: GraphDatabase, query: string, limit: number): NodeRow[] {
+  const rows: NodeRow[] = [];
+  const ftsQuery = queryToFtsMatch(query);
   if (ftsQuery) {
     rows.push(
       ...graph.sqlite
@@ -190,7 +216,7 @@ export function searchNodes(graph: GraphDatabase, query: string, limit = 20): Gr
           order by rank, nodes.qualified_name
           limit @limit`,
         )
-        .all({ query: ftsQuery, limit: rowLimit }) as NodeRow[],
+        .all({ query: ftsQuery, limit }) as NodeRow[],
     );
   }
 
@@ -215,21 +241,13 @@ export function searchNodes(graph: GraphDatabase, query: string, limit = 20): Gr
         limit @limit`,
       )
       .all({
-        query: trimmedQuery,
-        pattern: `%${escapeLike(trimmedQuery)}%`,
-        limit: rowLimit,
+        query,
+        pattern: `%${escapeLike(query)}%`,
+        limit,
       }) as NodeRow[],
   );
 
-  return uniqueRowsById(rows)
-    .filter((row) => !isSupersededScriptResourceSearchRow(graph, row))
-    .slice(0, limit)
-    .map(nodeFromRow);
-}
-
-function queryToFtsMatch(query: string): string {
-  const tokens = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
-  return tokens.map((token) => `"${token.replace(/"/g, "\"\"")}"`).join(" ");
+  return rows;
 }
 
 function escapeLike(value: string): string {
@@ -246,6 +264,10 @@ function uniqueRowsById(rows: NodeRow[]): NodeRow[] {
     seen.add(row.id);
     return true;
   });
+}
+
+function filterSupersededRows(graph: GraphDatabase, rows: NodeRow[]): NodeRow[] {
+  return rows.filter((row) => !isSupersededScriptResourceSearchRow(graph, row));
 }
 
 function isSupersededScriptResourceSearchRow(graph: GraphDatabase, row: NodeRow): boolean {

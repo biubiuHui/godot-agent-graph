@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createCliProgram } from "../../../src/cli/index.js";
-import { createGodotMcpServer } from "../../../src/mcp/server.js";
+import { createGodotMcpServer, createWatcherSyncHandler } from "../../../src/mcp/server.js";
 
 describe("MCP server wiring", () => {
   it("constructs a server with baseline tool names", () => {
@@ -9,6 +9,7 @@ describe("MCP server wiring", () => {
 
     expect(created.toolNames).toEqual([
       "godot_status",
+      "godot_context",
       "godot_project_map",
       "godot_sync",
       "godot_search",
@@ -35,5 +36,21 @@ describe("MCP server wiring", () => {
     await program.parseAsync(["node", "gdgraph", "serve", "--mcp", "/tmp/project"]);
 
     expect(calls).toEqual(["/tmp/project"]);
+  });
+
+  it("logs watcher sync failures without throwing", () => {
+    const messages: string[] = [];
+    const handler = createWatcherSyncHandler({
+      projectRoot: "/tmp/project",
+      syncProject: () => {
+        throw new Error("sync exploded");
+      },
+      logError: (message) => messages.push(message),
+    });
+
+    expect(() => handler()).not.toThrow();
+    expect(messages.join("\n")).toContain("watcher_sync_failed");
+    expect(messages.join("\n")).toContain("/tmp/project");
+    expect(messages.join("\n")).toContain("sync exploded");
   });
 });

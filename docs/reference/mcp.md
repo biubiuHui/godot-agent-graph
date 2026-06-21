@@ -10,7 +10,7 @@ Each tool accepts an optional `projectPath`. When omitted, the server project ro
 
 ## Freshness Contract
 
-Main tool responses include:
+Most graph query responses include:
 
 ```json
 {
@@ -29,6 +29,8 @@ Main tool responses include:
 
 When `indexFresh` is false, the graph may not include pending file changes. Call `godot_sync` or inspect the listed files before treating results as final.
 
+`godot_status` is intentionally shorter and returns only flat freshness fields, without the nested `freshness` object.
+
 ## godot_status
 
 Input:
@@ -37,7 +39,22 @@ Input:
 { "projectPath": "/path/to/project" }
 ```
 
-Returns initialization state, graph counts, project metadata, and freshness.
+Returns a concise health check: initialization state, live graph counts, `indexEmpty`, and flat freshness fields.
+
+## godot_context
+
+Input:
+
+```json
+{
+  "projectPath": "/path/to/project",
+  "query": "FixtureActor",
+  "maxFiles": 6,
+  "includeCode": false
+}
+```
+
+Primary first call for ordinary Godot code, scene, resource, signal, node-path, and call-chain questions. Returns concise status fields, live graph counts, bounded context, and recommended follow-up tools. Use focused tools such as `godot_search`, `godot_scene`, and `godot_impact` after this first pass.
 
 ## godot_project_map
 
@@ -47,7 +64,7 @@ Input:
 { "projectPath": "/path/to/project" }
 ```
 
-Returns a compact project overview for agent orientation: graph counts, project metadata, file/node/edge counts by kind, main scenes, script class summaries, resource directory summaries, parse errors, and freshness. It intentionally omits full indexed file metadata to keep MCP context small; use `gdgraph files` from the CLI when the full file table is needed.
+Returns a large top-level project overview for architecture/design orientation: graph counts, project metadata, file/node/edge counts by kind, main scenes, script class summaries, resource directory summaries, parse errors, and freshness. Use cautiously, only when a top-level design view is needed. It intentionally omits full indexed file metadata; use `gdgraph files` from the CLI when the full file table is needed.
 
 ## godot_sync
 
