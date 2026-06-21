@@ -300,6 +300,28 @@ describe("MCP Godot tools", () => {
     });
   });
 
+  it("marks the index stale when a new Godot file exists without a watcher event", () => {
+    const root = copyFixture("minimal");
+    indexGodotProject(root);
+    writeFileSync(
+      join(root, "scripts", "new_profile_data.gd"),
+      "extends Resource\nclass_name NewProfileData\n",
+    );
+
+    const response = parseTextContent(callGodotMcpTool("godot_status", { projectPath: root }));
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        initialized: true,
+        indexFresh: false,
+        pendingFiles: expect.arrayContaining([
+          { path: "res://scripts/new_profile_data.gd", indexing: false },
+        ]),
+      }),
+    );
+  });
+
   it("queries an indexed fixture through project map, search, and scene tools", () => {
     const root = copyFixture("minimal");
     const indexResult = indexGodotProject(root);

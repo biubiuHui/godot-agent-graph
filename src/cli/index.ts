@@ -23,7 +23,7 @@ import {
 } from "../installer/index.js";
 import { serveGodotMcp, type ServeGodotMcpOptions } from "../mcp/server.js";
 import { searchGraph } from "../search/index.js";
-import { attachFreshness, getGraphFreshness } from "../sync/freshness.js";
+import { attachFreshness, getScanAwareGraphFreshness } from "../sync/freshness.js";
 import { syncGodotProject } from "../sync/index.js";
 
 export interface CliProgramOptions {
@@ -132,7 +132,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
               dbPath: graph.databasePath,
               ...getProjectOverview(graph),
             },
-            getGraphFreshness(root, graph),
+            getScanAwareGraphFreshness(root, graph),
           ),
         );
       });

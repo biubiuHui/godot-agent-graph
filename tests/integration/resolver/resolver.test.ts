@@ -241,6 +241,78 @@ script = ExtResource("1_screen")
     }
   });
 
+  it("resolves signal connects to declared signal nodes by receiver", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "project.godot"),
+      `; Engine configuration file.
+
+[application]
+
+config/name="MinimalFixture"
+run/main_scene="res://fixture_main.tscn"
+
+[autoload]
+
+FixtureFx="*res://scripts/fixture_fx.gd"
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_fx.gd"),
+      `extends Node
+class_name FixtureFxClass
+
+signal fixture_feedback_requested
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "signal_caller.gd"),
+      `extends Node
+class_name SignalCaller
+
+func _ensure_fixture_connections() -> void:
+\tFixtureFx.fixture_feedback_requested.connect(_on_fixture_feedback_requested)
+
+func _on_fixture_feedback_requested() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "other_signal_caller.gd"),
+      `extends Node
+class_name OtherSignalCaller
+
+func _on_fixture_feedback_requested() -> void:
+\tpass
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      expect(listEdges(graph, { kind: "connects_signal" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/signal_caller.gd:_ensure_fixture_connections",
+            target: "signal:res://scripts/fixture_fx.gd:fixture_feedback_requested",
+            provenance: "resolver",
+          }),
+        ]),
+      );
+      expect(
+        listUnresolvedRefs(graph).filter(
+          (ref) =>
+            ref.referenceKind === "connects_signal" &&
+            ref.referenceName === "fixture_feedback_requested" &&
+            ref.filePath === "res://scripts/signal_caller.gd",
+        ),
+      ).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
   it("resolves method calls to the same script before falling back to global uniqueness", () => {
     const root = indexedFixture("minimal");
     writeFileSync(
@@ -332,6 +404,76 @@ func _ready() -> void:
             ref.referenceKind === "calls" &&
             ref.referenceName === "create" &&
             ref.filePath === "res://scripts/caller.gd",
+        ),
+      ).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("resolves autoload receiver method calls before global same-name fallback", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "project.godot"),
+      `; Engine configuration file.
+
+[application]
+
+config/name="MinimalFixture"
+run/main_scene="res://fixture_main.tscn"
+
+[autoload]
+
+FixtureFx="*res://scripts/fixture_fx.gd"
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_fx.gd"),
+      `extends Node
+class_name FixtureFxClass
+
+func request_fixture_feedback() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "other_fx.gd"),
+      `extends Node
+class_name OtherFx
+
+func request_fixture_feedback() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "autoload_caller.gd"),
+      `extends Node
+class_name AutoloadCaller
+
+func _ready() -> void:
+\tFixtureFx.request_fixture_feedback()
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      expect(listEdges(graph, { kind: "calls" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/autoload_caller.gd:_ready",
+            target: "method:res://scripts/fixture_fx.gd:request_fixture_feedback",
+            provenance: "resolver",
+          }),
+        ]),
+      );
+      expect(
+        listUnresolvedRefs(graph).filter(
+          (ref) =>
+            ref.referenceKind === "calls" &&
+            ref.referenceName === "request_fixture_feedback" &&
+            ref.filePath === "res://scripts/autoload_caller.gd",
         ),
       ).toEqual([]);
     } finally {
@@ -488,6 +630,121 @@ func make_metric_widget() -> MetricWidget:
               ref.referenceName === "apply_fixture"
             ) &&
             ref.filePath === "res://scripts/caller.gd",
+        ),
+      ).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("resolves method calls on typed collection loop entries", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "fixture_cell.gd"),
+      `extends RefCounted
+class_name FixtureCell
+
+func play_fixture_feedback_animation() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "other_cell.gd"),
+      `extends RefCounted
+class_name OtherCell
+
+func play_fixture_feedback_animation() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_panel.gd"),
+      `extends Node
+class_name FixturePanel
+
+var cells: Array[FixtureCell] = []
+
+func apply_fixture_state() -> void:
+\tfor cell_view in cells:
+\t\tcell_view.play_fixture_feedback_animation()
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      expect(listEdges(graph, { kind: "calls" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/fixture_panel.gd:apply_fixture_state",
+            target: "method:res://scripts/fixture_cell.gd:play_fixture_feedback_animation",
+            provenance: "resolver",
+          }),
+        ]),
+      );
+      expect(
+        listUnresolvedRefs(graph).filter(
+          (ref) =>
+            ref.referenceKind === "calls" &&
+            ref.referenceName === "play_fixture_feedback_animation" &&
+            ref.filePath === "res://scripts/fixture_panel.gd",
+        ),
+      ).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps parameter-typed receiver calls resolved when duplicate method names exist", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "fixture_query_subject.gd"),
+      `extends Node
+class_name FixtureBody
+
+func is_inside_fixture_area() -> bool:
+\treturn true
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "other_body.gd"),
+      `extends Node
+class_name OtherBody
+
+func is_inside_fixture_area() -> bool:
+\treturn false
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_query_runner.gd"),
+      `extends Node
+class_name FixtureQueryController
+
+func run_fixture_query(body: FixtureBody) -> void:
+\tbody.is_inside_fixture_area()
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      expect(listEdges(graph, { kind: "calls" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/fixture_query_runner.gd:run_fixture_query",
+            target: "method:res://scripts/fixture_query_subject.gd:is_inside_fixture_area",
+            provenance: "resolver",
+          }),
+        ]),
+      );
+      expect(
+        listUnresolvedRefs(graph).filter(
+          (ref) =>
+            ref.referenceKind === "calls" &&
+            ref.referenceName === "is_inside_fixture_area" &&
+            ref.filePath === "res://scripts/fixture_query_runner.gd",
         ),
       ).toEqual([]);
     } finally {

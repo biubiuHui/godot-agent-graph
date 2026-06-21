@@ -49,6 +49,11 @@ describe("extractGdscriptGraph", () => {
         expect.objectContaining({
           referenceName: "health_depleted",
           referenceKind: "connects_signal",
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              target: "_on_health_depleted",
+            }),
+          ]),
         }),
         expect.objectContaining({
           referenceName: "health_depleted",

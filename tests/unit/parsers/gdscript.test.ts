@@ -81,6 +81,7 @@ func _ready() -> void:
       },
       {
         signalName: "pressed",
+        receiver: "button",
         target: "_on_pressed",
         line: 6,
       },
@@ -93,6 +94,26 @@ func _ready() -> void:
         signalName: "selected",
         target: "_on_selected_again",
         line: 9,
+      },
+    ]);
+  });
+
+  it("parses signal connection receivers", () => {
+    const result = parseGdscript(
+      `extends Node
+
+func _ready() -> void:
+\tFixtureFx.fixture_feedback_requested.connect(_on_fixture_feedback_requested)
+`,
+      "res://scripts/signal_receiver.gd",
+    );
+
+    expect(result.signalConnects).toMatchObject([
+      {
+        signalName: "fixture_feedback_requested",
+        receiver: "FixtureFx",
+        target: "_on_fixture_feedback_requested",
+        line: 4,
       },
     ]);
   });

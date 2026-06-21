@@ -184,6 +184,26 @@ describe("gdgraph CLI commands", () => {
     );
   });
 
+  it("marks status stale when a new Godot file exists before sync", async () => {
+    const root = copyFixture("minimal");
+    await runCli(["index", root]);
+    writeFileSync(
+      join(root, "scripts", "cli_profile_data.gd"),
+      "extends Resource\nclass_name CliProfileData\n",
+    );
+
+    expect(await runCli(["status", root])).toEqual(
+      expect.objectContaining({
+        ok: true,
+        initialized: true,
+        indexFresh: false,
+        pendingFiles: expect.arrayContaining([
+          { path: "res://scripts/cli_profile_data.gd", indexing: false },
+        ]),
+      }),
+    );
+  });
+
   it("returns a clear JSON error for non-Godot projects", async () => {
     const root = mkdtempSync(join(tmpdir(), "gdgraph-cli-empty-"));
     tempRoots.push(root);

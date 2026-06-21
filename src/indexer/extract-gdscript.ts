@@ -360,6 +360,7 @@ function signalConnectUnresolved(
 ): UnresolvedRef {
   return unresolved(script, fromNodeId, signalConnect.signalName, "connects_signal", signalConnect.line, [
     {
+      receiver: signalConnect.receiver,
       target: signalConnect.target,
     },
   ]);

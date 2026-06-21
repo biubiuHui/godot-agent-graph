@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -307,6 +307,183 @@ describe("agent context queries", () => {
       )).toBeLessThan(callers.relationships.indexOf(
         "script:res://scripts/caller.gd calls validate (unresolved)",
       ));
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("shows resolved autoload receiver calls instead of unresolved caller matches", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "project.godot"),
+      `; Engine configuration file.
+
+[application]
+
+config/name="MinimalFixture"
+run/main_scene="res://fixture_main.tscn"
+
+[autoload]
+
+FixtureFx="*res://scripts/fixture_fx.gd"
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_fx.gd"),
+      `extends Node
+class_name FixtureFxClass
+
+func request_fixture_feedback() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "other_fx.gd"),
+      `extends Node
+class_name OtherFx
+
+func request_fixture_feedback() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "autoload_caller.gd"),
+      `extends Node
+class_name AutoloadCaller
+
+func _ready() -> void:
+\tFixtureFx.request_fixture_feedback()
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const callers = getCallersContext(graph, {
+        projectRoot: root,
+        symbol: "request_fixture_feedback",
+        includeCode: false,
+      });
+
+      expect(callers.relationships).toContain(
+        "method:res://scripts/autoload_caller.gd:_ready calls method:res://scripts/fixture_fx.gd:request_fixture_feedback (resolver)",
+      );
+      expect(callers.relationships).not.toContain(
+        "method:res://scripts/autoload_caller.gd:_ready calls request_fixture_feedback (unresolved)",
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("shows resolved typed collection entry calls instead of unresolved relationships", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "fixture_cell.gd"),
+      `extends RefCounted
+class_name FixtureCell
+
+func play_fixture_feedback_animation() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "other_cell.gd"),
+      `extends RefCounted
+class_name OtherCell
+
+func play_fixture_feedback_animation() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_panel.gd"),
+      `extends Node
+class_name FixturePanel
+
+var cells: Array[FixtureCell] = []
+
+func apply_fixture_state() -> void:
+\tfor cell_view in cells:
+\t\tcell_view.play_fixture_feedback_animation()
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const context = exploreGodotContext(graph, {
+        projectRoot: root,
+        query: "play_fixture_feedback_animation",
+        includeCode: false,
+      });
+
+      expect(context.relationships).toContain(
+        "method:res://scripts/fixture_panel.gd:apply_fixture_state calls method:res://scripts/fixture_cell.gd:play_fixture_feedback_animation (resolver)",
+      );
+      expect(context.relationships).not.toContain(
+        "method:res://scripts/fixture_panel.gd:apply_fixture_state calls play_fixture_feedback_animation (unresolved)",
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("shows signal declaration relationships for signal connection callers", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "project.godot"),
+      `; Engine configuration file.
+
+[application]
+
+config/name="MinimalFixture"
+run/main_scene="res://fixture_main.tscn"
+
+[autoload]
+
+FixtureFx="*res://scripts/fixture_fx.gd"
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "fixture_fx.gd"),
+      `extends Node
+class_name FixtureFxClass
+
+signal fixture_feedback_requested
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "signal_caller.gd"),
+      `extends Node
+class_name SignalCaller
+
+func _ensure_fixture_connections() -> void:
+\tFixtureFx.fixture_feedback_requested.connect(_on_fixture_feedback_requested)
+
+func _on_fixture_feedback_requested() -> void:
+\tpass
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const callers = getCallersContext(graph, {
+        projectRoot: root,
+        symbol: "fixture_feedback_requested",
+        includeCode: false,
+      });
+
+      expect(callers.relationships).toContain(
+        "method:res://scripts/signal_caller.gd:_ensure_fixture_connections connects_signal signal:res://scripts/fixture_fx.gd:fixture_feedback_requested (resolver)",
+      );
+      expect(callers.relationships).not.toContain(
+        "method:res://scripts/signal_caller.gd:_ensure_fixture_connections connects_signal fixture_feedback_requested (unresolved)",
+      );
     } finally {
       graph.close();
     }

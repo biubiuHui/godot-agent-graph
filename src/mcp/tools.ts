@@ -16,7 +16,7 @@ import {
   getSceneMap,
 } from "../graph/queries.js";
 import { searchGraph } from "../search/index.js";
-import { attachFreshness, getGraphFreshness } from "../sync/freshness.js";
+import { attachFreshness, getScanAwareGraphFreshness } from "../sync/freshness.js";
 import { syncGodotProject } from "../sync/index.js";
 import { globalPendingFileTracker } from "../sync/watcher.js";
 import { errorMessage, logMcpError } from "./logging.js";
@@ -194,7 +194,7 @@ function callGodotMcpToolUnsafe(
             modifiedCount: result.modified.length,
             deletedCount: result.deleted.length,
           },
-          getGraphFreshness(projectRoot, graph),
+          getScanAwareGraphFreshness(projectRoot, graph),
         ),
       );
     } finally {
@@ -322,7 +322,7 @@ function withInitializedGraph(
   const graph = createGraphDatabase(projectRoot);
   try {
     return jsonToolResult(
-      attachFreshness(callback(graph, projectRoot), getGraphFreshness(projectRoot, graph)),
+      attachFreshness(callback(graph, projectRoot), getScanAwareGraphFreshness(projectRoot, graph)),
     );
   } finally {
     graph.close();
@@ -346,7 +346,7 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
   const graph = createGraphDatabase(projectRoot);
   try {
     const overview = getProjectOverview(graph);
-    const freshness = getGraphFreshness(projectRoot, graph);
+    const freshness = getScanAwareGraphFreshness(projectRoot, graph);
     const indexEmpty = overview.fileCount === 0 && overview.nodeCount === 0;
     if (indexEmpty) {
       return {

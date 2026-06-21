@@ -131,6 +131,7 @@ function resolveUnresolvedRefs(
       }
     } else if (ref.referenceKind === "connects_signal") {
       const targetName = signalConnectTargetName(ref);
+      const signalTarget = signalConnectSignalTarget(ref, nodes, indexes);
       const source = indexes.byId.get(ref.fromNodeId);
       const localTarget =
         targetName && source?.filePath
@@ -145,11 +146,18 @@ function resolveUnresolvedRefs(
       const target = localTarget ?? (targetName
         ? uniqueNode(nodes.filter((node) => node.kind === "method" && node.name === targetName))
         : null);
+      if (signalTarget) {
+        resolved = addResolved(ref.fromNodeId, signalTarget.id, "connects_signal", {
+          signal: ref.referenceName,
+          target: targetName,
+          candidates: ref.candidates,
+        }) || resolved;
+      }
       if (target) {
         resolved = addResolved(ref.fromNodeId, target.id, "connects_signal", {
           signal: ref.referenceName,
           candidates: ref.candidates,
-        });
+        }) || resolved;
       }
     } else if (ref.referenceKind === "emits_signal") {
       const source = indexes.byId.get(ref.fromNodeId);
@@ -169,6 +177,8 @@ function resolveUnresolvedRefs(
       }
     } else if (ref.referenceKind === "calls") {
       const source = indexes.byId.get(ref.fromNodeId);
+      const receiver = callReceiver(ref);
+      const autoloadTarget = autoloadReceiverCallTarget(ref, nodes, indexes);
       const staticTarget = staticCallTarget(ref, nodes, indexes);
       const typedInstanceTarget = typedInstanceCallTarget(ref, nodes, indexes, projectRoot, sourceCache);
       const localTarget = source?.filePath
@@ -180,15 +190,17 @@ function resolveUnresolvedRefs(
             ),
           )
         : null;
-      const target = staticTarget ?? typedInstanceTarget ?? localTarget ?? uniqueNode(
-        nodes.filter((node) => node.kind === "method" && node.name === ref.referenceName),
-      );
+      const target = receiver
+        ? autoloadTarget ?? staticTarget ?? typedInstanceTarget
+        : localTarget ?? uniqueNode(
+            nodes.filter((node) => node.kind === "method" && node.name === ref.referenceName),
+          );
       if (target) {
         resolved = addResolved(
           ref.fromNodeId,
           target.id,
           "calls",
-          staticTarget || typedInstanceTarget ? { candidates: ref.candidates } : {},
+          autoloadTarget || staticTarget || typedInstanceTarget ? { candidates: ref.candidates } : {},
         );
       }
     } else if (ref.referenceKind === "references_nodepath") {
@@ -269,13 +281,86 @@ function signalConnectTargetName(ref: UnresolvedRef): string | null {
   return typeof target === "string" && target.length > 0 ? target : null;
 }
 
+function signalConnectReceiver(ref: UnresolvedRef): string | null {
+  const receiver = ref.candidates.find((candidate) => typeof candidate.receiver === "string")?.receiver;
+  return typeof receiver === "string" && receiver.length > 0 ? receiver : null;
+}
+
+function signalConnectSignalTarget(
+  ref: UnresolvedRef,
+  nodes: GraphNode[],
+  indexes: ReturnType<typeof buildGodotPathIndexes>,
+): GraphNode | null {
+  const source = indexes.byId.get(ref.fromNodeId);
+  const receiver = signalConnectReceiver(ref);
+  let signalFilePath: string | null = null;
+
+  if (receiver) {
+    const autoload = indexes.autoloadsByName.get(receiver);
+    const autoloadPath = typeof autoload?.metadata.path === "string" ? autoload.metadata.path : null;
+    signalFilePath = autoloadPath
+      ? indexes.scriptsByPath.get(autoloadPath)?.filePath ?? null
+      : uniqueNode((indexes.byName.get(receiver) ?? []).filter((node) => node.kind === "script_class"))?.filePath ?? null;
+  } else {
+    signalFilePath = source?.filePath ?? null;
+  }
+
+  if (!signalFilePath) {
+    return null;
+  }
+
+  return uniqueNode(
+    nodes.filter((node) =>
+      node.kind === "signal" &&
+      node.name === ref.referenceName &&
+      node.filePath === signalFilePath,
+    ),
+  );
+}
+
+function callReceiver(ref: UnresolvedRef): string | null {
+  const receiver = ref.candidates.find((candidate) => typeof candidate.receiver === "string")?.receiver;
+  return typeof receiver === "string" && receiver.length > 0 ? receiver : null;
+}
+
+function autoloadReceiverCallTarget(
+  ref: UnresolvedRef,
+  nodes: GraphNode[],
+  indexes: ReturnType<typeof buildGodotPathIndexes>,
+): GraphNode | null {
+  const receiver = callReceiver(ref);
+  if (!receiver) {
+    return null;
+  }
+
+  const autoload = indexes.autoloadsByName.get(receiver);
+  const scriptPath = typeof autoload?.metadata.path === "string" ? autoload.metadata.path : null;
+  if (!scriptPath) {
+    return null;
+  }
+
+  const scriptClass = indexes.scriptsByPath.get(scriptPath);
+  if (!scriptClass?.filePath) {
+    return null;
+  }
+
+  return uniqueNode(
+    nodes.filter((node) =>
+      node.kind === "method" &&
+      node.name === ref.referenceName &&
+      node.filePath === scriptClass.filePath &&
+      node.metadata.static !== true,
+    ),
+  );
+}
+
 function staticCallTarget(
   ref: UnresolvedRef,
   nodes: GraphNode[],
   indexes: ReturnType<typeof buildGodotPathIndexes>,
 ): GraphNode | null {
-  const receiver = ref.candidates.find((candidate) => typeof candidate.receiver === "string")?.receiver;
-  if (typeof receiver !== "string" || receiver.length === 0) {
+  const receiver = callReceiver(ref);
+  if (!receiver) {
     return null;
   }
 
@@ -303,8 +388,8 @@ function typedInstanceCallTarget(
   projectRoot: string,
   sourceCache: Map<string, string[] | null>,
 ): GraphNode | null {
-  const receiver = ref.candidates.find((candidate) => typeof candidate.receiver === "string")?.receiver;
-  if (typeof receiver !== "string" || receiver.length === 0) {
+  const receiver = callReceiver(ref);
+  if (!receiver) {
     return null;
   }
 
@@ -483,6 +568,15 @@ function localVariableType(
 
   for (let lineIndex = ref.line - 2; lineIndex >= containingMethod.startLine - 1; lineIndex -= 1) {
     const line = lines[lineIndex] ?? "";
+    const loopEntry = line.match(new RegExp(`\\bfor\\s+${escapeRegExp(variableName)}\\s+in\\s+([^:]+):`));
+    const loopCollection = loopEntry?.[1]?.trim() ?? null;
+    if (loopCollection) {
+      const elementType = collectionElementType(ref, loopCollection, nodes, projectRoot, sourceCache);
+      if (elementType) {
+        return elementType;
+      }
+    }
+
     const explicitType = line.match(new RegExp(`\\bvar\\s+${escapeRegExp(variableName)}\\s*:\\s*([A-Za-z_]\\w*)`));
     const explicitTypeName = projectTypeName(explicitType?.[1] ?? null);
     if (explicitTypeName) {
@@ -521,6 +615,89 @@ function localVariableType(
   }
 
   return null;
+}
+
+function collectionElementType(
+  ref: UnresolvedRef,
+  expression: string,
+  nodes: GraphNode[],
+  projectRoot: string,
+  sourceCache: Map<string, string[] | null>,
+): string | null {
+  const localElementType = localCollectionElementType(ref, expression, projectRoot, sourceCache);
+  if (localElementType) {
+    return localElementType;
+  }
+
+  const expressionParts = expression.split(".").filter((part) => part.length > 0);
+  const propertyName = expressionParts.at(-1) ?? expression;
+  if (expressionParts.length > 1) {
+    const receiverExpression = expressionParts.slice(0, -1).join(".");
+    const receiverType = receiverTypeName(ref, receiverExpression, nodes, projectRoot, sourceCache);
+    if (receiverType) {
+      return collectionElementTypeOnClass(receiverType, propertyName, nodes);
+    }
+  }
+
+  return directCollectionElementType(propertyName, nodes);
+}
+
+function localCollectionElementType(
+  ref: UnresolvedRef,
+  variableName: string,
+  projectRoot: string,
+  sourceCache: Map<string, string[] | null>,
+): string | null {
+  if (ref.line === null) {
+    return null;
+  }
+
+  const lines = sourceLines(ref.filePath, projectRoot, sourceCache);
+  if (!lines) {
+    return null;
+  }
+
+  for (let lineIndex = ref.line - 2; lineIndex >= 0; lineIndex -= 1) {
+    const line = lines[lineIndex] ?? "";
+    const elementType = declaredCollectionElementType(line, variableName);
+    if (elementType) {
+      return elementType;
+    }
+  }
+
+  return null;
+}
+
+function directCollectionElementType(propertyName: string, nodes: GraphNode[]): string | null {
+  const property = uniqueNode(
+    nodes.filter((node) =>
+      node.kind === "property" &&
+      node.name === propertyName &&
+      node.signature !== null,
+    ),
+  );
+
+  return property?.signature ? declaredCollectionElementType(property.signature, propertyName) : null;
+}
+
+function collectionElementTypeOnClass(className: string, propertyName: string, nodes: GraphNode[]): string | null {
+  const property = uniqueNode(
+    nodes.filter((node) =>
+      node.kind === "property" &&
+      node.name === propertyName &&
+      node.qualifiedName === `${className}.${propertyName}` &&
+      node.signature !== null,
+    ),
+  );
+
+  return property?.signature ? declaredCollectionElementType(property.signature, propertyName) : null;
+}
+
+function declaredCollectionElementType(signature: string, variableName: string): string | null {
+  const escaped = escapeRegExp(variableName);
+  const arrayMatch = signature.match(new RegExp(`\\b(?:var|const)\\s+${escaped}\\s*:\\s*Array\\s*\\[\\s*([A-Za-z_]\\w*)\\s*\\]`));
+  const dictionaryMatch = signature.match(new RegExp(`\\b(?:var|const)\\s+${escaped}\\s*:\\s*Dictionary\\s*\\[\\s*[^,\\]]+\\s*,\\s*([A-Za-z_]\\w*)\\s*\\]`));
+  return projectTypeName(arrayMatch?.[1] ?? dictionaryMatch?.[1] ?? null);
 }
 
 function localPreloadClassName(

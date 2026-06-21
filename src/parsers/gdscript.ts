@@ -55,6 +55,7 @@ export interface GdscriptSignalEmit {
 
 export interface GdscriptSignalConnect {
   signalName: string;
+  receiver: string | null;
   target: string | null;
   line: number;
   scope?: GdscriptReferenceScope | null;
@@ -711,14 +712,15 @@ function collectSignalUsage(
     });
   }
 
-  for (const match of codeOnlyLine.matchAll(/\b([A-Za-z_]\w*)\.connect\(/g)) {
+  for (const match of codeOnlyLine.matchAll(/\b(?:(?<receiver>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.)?(?<signal>[A-Za-z_]\w*)\.connect\(/g)) {
     const start = match.index ?? 0;
     if (isInString(stringMask, start)) {
       continue;
     }
     const args = callArguments(line, start + match[0].length - 1);
     result.signalConnects.push({
-      signalName: match[1] ?? "",
+      signalName: match.groups?.signal ?? "",
+      receiver: match.groups?.receiver ?? null,
       target: cleanCallableTarget(args[0] ?? "", callableAliases),
       line: lineNumber,
       scope,
@@ -737,6 +739,7 @@ function collectSignalUsage(
     }
     result.signalConnects.push({
       signalName,
+      receiver: null,
       target: cleanCallableTarget(args[1] ?? "", callableAliases),
       line: lineNumber,
       scope,
