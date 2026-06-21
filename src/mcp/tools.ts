@@ -19,6 +19,7 @@ import { searchGraph } from "../search/index.js";
 import { attachFreshness, getGraphFreshness } from "../sync/freshness.js";
 import { syncGodotProject } from "../sync/index.js";
 import { globalPendingFileTracker } from "../sync/watcher.js";
+import { errorMessage, logMcpError } from "./logging.js";
 
 export interface GodotMcpToolDefinition {
   name: string;
@@ -43,8 +44,13 @@ export function listGodotMcpTools(): GodotMcpToolDefinition[] {
       inputSchema: projectPathSchema(),
     },
     {
+      name: "godot_context",
+      description: "Primary first call for Godot code, scene, resource, signal, and node-path questions. Returns bounded context plus next recommended graph tools.",
+      inputSchema: contextQuerySchema("query"),
+    },
+    {
       name: "godot_project_map",
-      description: "Return a high-level Godot project map from the local graph index.",
+      description: "Return a large top-level Godot project map. Use cautiously, only when a top-level architecture/design overview is needed.",
       inputSchema: projectPathSchema(),
     },
     {
@@ -109,6 +115,25 @@ export function callGodotMcpTool(
   name: string,
   args: Record<string, unknown> = {},
 ): GodotMcpToolResult {
+  try {
+    return callGodotMcpToolUnsafe(name, args);
+  } catch (error) {
+    logMcpError("tool_failed", error, {
+      tool: name,
+      projectRoot: safeProjectRootFromArgs(args),
+    });
+    return jsonToolResult({
+      ok: false,
+      tool: name,
+      error: errorMessage(error),
+    });
+  }
+}
+
+function callGodotMcpToolUnsafe(
+  name: string,
+  args: Record<string, unknown> = {},
+): GodotMcpToolResult {
   if (name === "godot_status") {
     return jsonToolResult(statusPayload(projectRootFromArgs(args)));
   }
@@ -120,6 +145,35 @@ export function callGodotMcpTool(
         ...getProjectMap(graph),
       };
     });
+  }
+
+  if (name === "godot_context") {
+    const query = requiredString(args, "query");
+    return withInitializedGraph(projectRootFromArgs(args), (graph, projectRoot) => ({
+      ok: true,
+      query,
+      ...indexSummary(graph),
+      context: exploreGodotContext(graph, {
+        projectRoot,
+        query,
+        maxFiles: optionalNumber(args, "maxFiles") ?? 6,
+        includeCode: optionalBoolean(args, "includeCode") ?? false,
+      }),
+      nextTools: [
+        {
+          tool: "godot_search",
+          reason: "Use for focused symbol, scene, script, signal, or resource follow-up.",
+        },
+        {
+          tool: "godot_scene",
+          reason: "Use when the context identifies a specific .tscn scene path.",
+        },
+        {
+          tool: "godot_impact",
+          reason: "Use before editing a matched script, scene, resource, signal, or call chain.",
+        },
+      ],
+    }));
   }
 
   if (name === "godot_sync") {
@@ -154,6 +208,7 @@ export function callGodotMcpTool(
     return withInitializedGraph(projectRootFromArgs(args), (graph) => ({
       ok: true,
       query,
+      ...indexSummary(graph),
       results: searchGraph(graph, query, limit),
     }));
   }
@@ -280,34 +335,44 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
     return {
       ok: false,
       initialized: false,
-      projectRoot,
-      dbPath,
       indexFresh: false,
       pendingFiles: [],
       watcher: "disabled",
       lastSyncAt: null,
-      freshness: {
-        indexFresh: false,
-        pendingFiles: [],
-        watcher: "disabled",
-        lastSyncAt: null,
-      },
       message: "No gdgraph index found. Run gdgraph init, gdgraph index, or godot_sync first.",
     };
   }
 
   const graph = createGraphDatabase(projectRoot);
   try {
-    return attachFreshness(
-      {
-        ok: true,
+    const overview = getProjectOverview(graph);
+    const freshness = getGraphFreshness(projectRoot, graph);
+    const indexEmpty = overview.fileCount === 0 && overview.nodeCount === 0;
+    if (indexEmpty) {
+      return {
+        ok: false,
         initialized: true,
-        projectRoot,
-        dbPath,
-        ...getProjectOverview(graph),
-      },
-      getGraphFreshness(projectRoot, graph),
-    );
+        indexEmpty,
+        fileCount: overview.fileCount,
+        nodeCount: overview.nodeCount,
+        edgeCount: overview.edgeCount,
+        unresolvedRefCount: overview.unresolvedRefCount,
+        ...freshness,
+        indexFresh: false,
+        message: "The gdgraph index exists but is empty. Run gdgraph sync, gdgraph index, or godot_sync before relying on graph answers.",
+      };
+    }
+
+    return {
+      ok: true,
+      initialized: true,
+      indexEmpty,
+      fileCount: overview.fileCount,
+      nodeCount: overview.nodeCount,
+      edgeCount: overview.edgeCount,
+      unresolvedRefCount: overview.unresolvedRefCount,
+      ...freshness,
+    };
   } finally {
     graph.close();
   }
@@ -326,6 +391,25 @@ function jsonToolResult(payload: unknown): GodotMcpToolResult {
 
 function projectRootFromArgs(args: Record<string, unknown>): string {
   return resolve(typeof args.projectPath === "string" ? args.projectPath : ".");
+}
+
+function safeProjectRootFromArgs(args: Record<string, unknown>): string | null {
+  try {
+    return projectRootFromArgs(args);
+  } catch {
+    return null;
+  }
+}
+
+function indexSummary(graph: ReturnType<typeof createGraphDatabase>): Record<string, unknown> {
+  const overview = getProjectOverview(graph);
+  return {
+    fileCount: overview.fileCount,
+    nodeCount: overview.nodeCount,
+    edgeCount: overview.edgeCount,
+    unresolvedRefCount: overview.unresolvedRefCount,
+    indexEmpty: overview.fileCount === 0 && overview.nodeCount === 0,
+  };
 }
 
 function requiredString(args: Record<string, unknown>, key: string): string {

@@ -38,8 +38,10 @@ describe("gdgraph MCP installer", () => {
     const homeDir = tempRoot("gdgraph-installer-home-");
     const projectRoot = tempRoot("gdgraph-installer-project-");
     const configPath = join(homeDir, ".codex", "config.toml");
+    const agentsPath = join(projectRoot, "AGENTS.md");
     mkdirSync(join(homeDir, ".codex"), { recursive: true });
     writeFileSync(configPath, "model = \"gpt-5-codex\"\n");
+    writeFileSync(agentsPath, "# Project Notes\n\nKeep this line.\n");
 
     const result = installGdgraphMcp({
       target: "codex",
@@ -69,6 +71,50 @@ startup_timeout_sec = 60
 # godot-agent-graph:end codex
 `,
     );
+    expect(readText(agentsPath)).toBe(`# Project Notes
+
+Keep this line.
+
+<!-- godot-agent-graph:begin codex-instructions -->
+## Godot Graph Navigation
+
+- For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool \`godot_context\` before broad file search.
+- If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\` or \`gdgraph explore <query> --path <project>\`.
+- Before edits, refactors, reviews, or debugging changes, use \`godot_impact\` or \`gdgraph impact <target> --path <project>\`.
+<!-- godot-agent-graph:end codex-instructions -->
+`);
+  });
+
+  it("updates the owned Codex fallback instructions without duplicating them", () => {
+    const homeDir = tempRoot("gdgraph-installer-home-");
+    const projectRoot = tempRoot("gdgraph-installer-project-");
+    const agentsPath = join(projectRoot, "AGENTS.md");
+    writeFileSync(
+      agentsPath,
+      `Intro
+
+<!-- godot-agent-graph:begin codex-instructions -->
+old text
+<!-- godot-agent-graph:end codex-instructions -->
+
+Outro
+`,
+    );
+
+    const result = installGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+    });
+
+    expect(result.ok).toBe(true);
+    const text = readText(agentsPath);
+    expect(text).toContain("Intro");
+    expect(text).toContain("Outro");
+    expect(text).toContain("godot_context");
+    expect(text).not.toContain("old text");
+    expect(text.match(/godot-agent-graph:begin codex-instructions/g)).toHaveLength(1);
   });
 
   it("uses an absolute Node launch spec for Codex when installed from the gdgraph bin", () => {
@@ -95,7 +141,19 @@ startup_timeout_sec = 60
     const homeDir = tempRoot("gdgraph-installer-home-");
     const projectRoot = tempRoot("gdgraph-installer-project-");
     const configPath = join(homeDir, ".codex", "config.toml");
-    const gdgraphBin = String.raw`C:\Users\player\AppData\Roaming\npm\node_modules\godot-agent-graph\dist\bin\gdgraph.js`;
+    const gdgraphBin = [
+      "C:",
+      "Users",
+      "player",
+      "AppData",
+      "Roaming",
+      "npm",
+      "node_modules",
+      "godot-agent-graph",
+      "dist",
+      "bin",
+      "gdgraph.js",
+    ].join("\\");
     process.argv[1] = gdgraphBin;
 
     const result = installGdgraphMcp({
@@ -113,6 +171,7 @@ startup_timeout_sec = 60
     const homeDir = tempRoot("gdgraph-installer-home-");
     const projectRoot = tempRoot("gdgraph-installer-project-");
     const configPath = join(homeDir, ".codex", "config.toml");
+    const agentsPath = join(projectRoot, "AGENTS.md");
     mkdirSync(join(homeDir, ".codex"), { recursive: true });
     writeFileSync(
       configPath,
@@ -128,6 +187,17 @@ startup_timeout_sec = 60
 
 [mcp_servers.context7]
 command = "context7"
+`,
+    );
+    writeFileSync(
+      agentsPath,
+      `# Project Notes
+
+<!-- godot-agent-graph:begin codex-instructions -->
+managed text
+<!-- godot-agent-graph:end codex-instructions -->
+
+Keep me.
 `,
     );
 
@@ -150,6 +220,10 @@ command = "context7"
 
 [mcp_servers.context7]
 command = "context7"
+`);
+    expect(readText(agentsPath)).toBe(`# Project Notes
+
+Keep me.
 `);
   });
 

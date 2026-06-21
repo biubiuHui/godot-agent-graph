@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,6 +37,22 @@ afterEach(() => {
 });
 
 describe("gdgraph CLI commands", () => {
+  it("prints top-level help without a Commander stack trace", () => {
+    const result = spawnSync(
+      join(process.cwd(), "node_modules", ".bin", "tsx"),
+      ["src/bin/gdgraph.ts", "--help"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Usage: gdgraph");
+    expect(result.stderr).not.toContain("CommanderError");
+    expect(result.stderr).not.toContain("helpDisplayed");
+  });
+
   it("indexes a project with init and reports status", async () => {
     const root = copyFixture("minimal");
 

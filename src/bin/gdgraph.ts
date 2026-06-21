@@ -13,4 +13,24 @@ const packageMetadata = JSON.parse(
   readFileSync(packageJsonUrl, "utf8"),
 ) as PackageMetadata;
 
-await createCliProgram({ version: packageMetadata.version }).parseAsync(process.argv);
+try {
+  await createCliProgram({ version: packageMetadata.version }).parseAsync(process.argv);
+} catch (error) {
+  if (!isCommanderExit(error)) {
+    throw error;
+  }
+
+  process.exitCode = error.exitCode;
+}
+
+function isCommanderExit(error: unknown): error is { exitCode: number; code: string } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "exitCode" in error &&
+    "code" in error &&
+    typeof error.exitCode === "number" &&
+    typeof error.code === "string" &&
+    error.code.startsWith("commander.")
+  );
+}

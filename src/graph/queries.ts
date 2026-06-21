@@ -1,5 +1,8 @@
 import type { GraphDatabase } from "../db/index.js";
 import {
+  countEdges,
+  countNodes,
+  countUnresolvedRefs,
   getNode,
   getProjectMetadata,
   listEdges,
@@ -110,10 +113,10 @@ export function getProjectOverview(graph: GraphDatabase): ProjectOverview {
   const value = metadata?.value ?? {};
 
   return {
-    fileCount: getNumber(value, "fileCount"),
-    nodeCount: getNumber(value, "nodeCount"),
-    edgeCount: getNumber(value, "edgeCount"),
-    unresolvedRefCount: getNumber(value, "unresolvedRefCount"),
+    fileCount: listIndexedFiles(graph).length,
+    nodeCount: countNodes(graph),
+    edgeCount: countEdges(graph),
+    unresolvedRefCount: countUnresolvedRefs(graph),
     project: getObject(value, "project"),
   };
 }
@@ -310,11 +313,6 @@ function summarizeResourceDirectories(files: GraphFile[]): ResourceDirectorySumm
 function parentResourcePath(path: string): string {
   const index = path.lastIndexOf("/");
   return index > "res://".length ? path.slice(0, index) : "res://";
-}
-
-function getNumber(value: Record<string, unknown>, key: string): number {
-  const field = value[key];
-  return typeof field === "number" ? field : 0;
 }
 
 function getObject(value: Record<string, unknown>, key: string): Record<string, unknown> | null {

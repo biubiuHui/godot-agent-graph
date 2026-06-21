@@ -108,6 +108,26 @@ describe("graph storage queries", () => {
         methodNode.id,
       ]);
 
+      const fixtureStatsNode: GraphNode = {
+        id: "resource:res://resources/fixture_stats.tres",
+        kind: "resource",
+        name: "fixture_stats.tres",
+        qualifiedName: "res://resources/fixture_stats.tres",
+        filePath: null,
+        startLine: 1,
+        endLine: null,
+        signature: "Resource",
+        metadata: {},
+        updatedAt: 3003,
+      };
+      upsertNode(graph, fixtureStatsNode);
+
+      expect(searchNodes(graph, "FixtureActor fixture_stats").map((node) => node.id)).toEqual([
+        scriptNode.id,
+        methodNode.id,
+        fixtureStatsNode.id,
+      ]);
+
       const edge: GraphEdge = {
         source: scriptNode.id,
         target: methodNode.id,

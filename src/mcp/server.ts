@@ -4,8 +4,9 @@ import { z } from "zod";
 import { resolve } from "node:path";
 
 import { getMcpInstructions } from "./instructions.js";
+import { logMcpError, type McpLogWriter } from "./logging.js";
 import { callGodotMcpTool, listGodotMcpTools } from "./tools.js";
-import { syncGodotProject } from "../sync/index.js";
+import { syncGodotProject, type SyncGodotProjectResult } from "../sync/index.js";
 import { globalPendingFileTracker, watchGodotProject } from "../sync/watcher.js";
 
 export interface CreateGodotMcpServerOptions {
@@ -19,6 +20,13 @@ export interface CreatedGodotMcpServer {
 
 export interface ServeGodotMcpOptions {
   projectRoot?: string;
+}
+
+export interface CreateWatcherSyncHandlerOptions {
+  projectRoot: string;
+  syncProject?: (projectRoot: string) => SyncGodotProjectResult;
+  clearPending?: (projectRoot: string) => void;
+  logError?: McpLogWriter;
 }
 
 export function createGodotMcpServer(
@@ -61,16 +69,16 @@ export async function serveGodotMcp(options: ServeGodotMcpOptions = {}): Promise
   const syncResult = syncGodotProject(projectRoot);
   if (syncResult.ok) {
     globalPendingFileTracker.clearPending(projectRoot);
+  } else {
+    logMcpError("startup_sync_failed", new Error(syncResult.message), {
+      projectRoot,
+      reason: syncResult.reason,
+    });
   }
 
   const watcher = syncResult.ok
     ? watchGodotProject(projectRoot, {
-        onSync: () => {
-          const result = syncGodotProject(projectRoot);
-          if (result.ok) {
-            globalPendingFileTracker.clearPending(projectRoot);
-          }
-        },
+        onSync: createWatcherSyncHandler({ projectRoot }),
       })
     : null;
 
@@ -81,6 +89,33 @@ export async function serveGodotMcp(options: ServeGodotMcpOptions = {}): Promise
     watcher?.close();
     throw error;
   }
+}
+
+export function createWatcherSyncHandler(
+  options: CreateWatcherSyncHandlerOptions,
+): () => void {
+  const syncProject = options.syncProject ?? syncGodotProject;
+  const clearPending =
+    options.clearPending ?? ((projectRoot) => globalPendingFileTracker.clearPending(projectRoot));
+
+  return () => {
+    try {
+      const result = syncProject(options.projectRoot);
+      if (result.ok) {
+        clearPending(options.projectRoot);
+        return;
+      }
+
+      logMcpError("watcher_sync_failed", new Error(result.message), {
+        projectRoot: options.projectRoot,
+        reason: result.reason,
+      }, options.logError);
+    } catch (error) {
+      logMcpError("watcher_sync_failed", error, {
+        projectRoot: options.projectRoot,
+      }, options.logError);
+    }
+  };
 }
 
 function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAny> {
@@ -99,7 +134,7 @@ function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAny> {
     };
   }
 
-  if (toolName === "godot_explore") {
+  if (toolName === "godot_context" || toolName === "godot_explore") {
     return {
       projectPath: z.string().optional(),
       query: z.string(),

@@ -1,10 +1,11 @@
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createGraphDatabase } from "../../../src/db/index.js";
 import { indexGodotProject } from "../../../src/indexer/indexer.js";
 import { getMcpInstructions } from "../../../src/mcp/instructions.js";
 import { callGodotMcpTool, listGodotMcpTools } from "../../../src/mcp/tools.js";
@@ -36,16 +37,19 @@ describe("MCP Godot tools", () => {
   it("provides graph-first agent instructions", () => {
     const instructions = getMcpInstructions();
 
-    expect(instructions).toContain("godot_project_map");
+    expect(instructions).toContain("godot_context");
     expect(instructions).toContain("godot_search");
     expect(instructions).toContain("godot_scene");
     expect(instructions).toContain("Do not start with broad grep");
     expect(instructions).toContain("indexFresh");
+    expect(instructions).not.toContain("godot_project_map");
   });
 
   it("lists baseline tools", () => {
-    expect(listGodotMcpTools().map((tool) => tool.name)).toEqual([
+    const tools = listGodotMcpTools();
+    expect(tools.map((tool) => tool.name)).toEqual([
       "godot_status",
+      "godot_context",
       "godot_project_map",
       "godot_sync",
       "godot_search",
@@ -56,6 +60,18 @@ describe("MCP Godot tools", () => {
       "godot_callees",
       "godot_impact",
     ]);
+    expect(tools.find((tool) => tool.name === "godot_project_map")?.description).toContain(
+      "large",
+    );
+    expect(tools.find((tool) => tool.name === "godot_project_map")?.description).toContain(
+      "top-level",
+    );
+    expect(tools.find((tool) => tool.name === "godot_project_map")?.description).toContain(
+      "Use cautiously",
+    );
+    expect(tools.find((tool) => tool.name === "godot_context")?.description).toContain(
+      "first call",
+    );
   });
 
   it("syncs through MCP and reports freshness metadata", () => {
@@ -84,6 +100,19 @@ describe("MCP Godot tools", () => {
       }),
     );
 
+    expect(
+      parseTextContent(callGodotMcpTool("godot_search", { projectPath: root, query: "NoSuchSymbol" })),
+    ).toEqual(
+      expect.objectContaining({
+        ok: true,
+        results: [],
+        fileCount: expect.any(Number),
+        nodeCount: expect.any(Number),
+        edgeCount: expect.any(Number),
+        indexEmpty: false,
+      }),
+    );
+
     const sync = parseTextContent(callGodotMcpTool("godot_sync", { projectPath: root }));
     expect(sync).toEqual(
       expect.objectContaining({
@@ -101,6 +130,65 @@ describe("MCP Godot tools", () => {
     );
   });
 
+  it("returns primary Godot context with next tool guidance", () => {
+    const root = copyFixture("minimal");
+    indexGodotProject(root);
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_context", {
+        projectPath: root,
+        query: "FixtureActor",
+        includeCode: false,
+      }),
+    );
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        query: "FixtureActor",
+        fileCount: 3,
+        nodeCount: expect.any(Number),
+        edgeCount: expect.any(Number),
+        indexEmpty: false,
+        indexFresh: true,
+        pendingFiles: [],
+        watcher: "disabled",
+        lastSyncAt: expect.any(Number),
+        context: expect.objectContaining({
+          query: "FixtureActor",
+          files: expect.arrayContaining(["res://scripts/fixture_actor.gd"]),
+          snippets: [],
+        }),
+        nextTools: expect.arrayContaining([
+          expect.objectContaining({
+            tool: "godot_search",
+            reason: expect.stringContaining("symbol"),
+          }),
+          expect.objectContaining({
+            tool: "godot_impact",
+            reason: expect.stringContaining("editing"),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("uses the conservative status payload when primary context has no usable index", () => {
+    const root = mkdtempSync(join(tmpdir(), "gdgraph-mcp-context-no-index-"));
+    tempRoots.push(root);
+
+    expect(
+      parseTextContent(callGodotMcpTool("godot_context", { projectPath: root, query: "Player" })),
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        initialized: false,
+        indexFresh: false,
+        message: expect.stringContaining("No gdgraph index"),
+      }),
+    );
+  });
+
   it("returns friendly uninitialized status", () => {
     const root = mkdtempSync(join(tmpdir(), "gdgraph-mcp-empty-"));
     tempRoots.push(root);
@@ -114,9 +202,102 @@ describe("MCP Godot tools", () => {
         ok: false,
         initialized: false,
         indexFresh: false,
-        projectRoot: root,
       }),
     );
+    expect(response).not.toHaveProperty("projectRoot");
+    expect(response).not.toHaveProperty("dbPath");
+    expect(response).not.toHaveProperty("freshness");
+  });
+
+  it("marks an empty graph database as stale instead of fresh", () => {
+    const root = mkdtempSync(join(tmpdir(), "gdgraph-mcp-empty-db-"));
+    tempRoots.push(root);
+    mkdirSync(join(root, ".gdgraph"), { recursive: true });
+
+    const graph = createGraphDatabase(root);
+    graph.close();
+
+    expect(parseTextContent(callGodotMcpTool("godot_status", { projectPath: root }))).toEqual(
+      expect.objectContaining({
+        ok: false,
+        initialized: true,
+        indexEmpty: true,
+        indexFresh: false,
+        message: expect.stringContaining("empty"),
+      }),
+    );
+  });
+
+  it("returns a structured tool error instead of throwing when graph data is invalid", () => {
+    const root = copyFixture("minimal");
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      graph.sqlite
+        .prepare("update nodes set metadata = ? where id = ?")
+        .run("{bad-json", "script:res://scripts/fixture_actor.gd");
+    } finally {
+      graph.close();
+    }
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_impact", { projectPath: root, target: "FixtureActor" }),
+    );
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: false,
+        tool: "godot_impact",
+        error: expect.stringContaining("JSON"),
+      }),
+    );
+  });
+
+  it("reports live graph counts when index metadata is missing", () => {
+    const root = copyFixture("minimal");
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      graph.sqlite.prepare("delete from project_metadata where key = 'index'").run();
+    } finally {
+      graph.close();
+    }
+
+    expect(parseTextContent(callGodotMcpTool("godot_status", { projectPath: root }))).toEqual(
+      expect.objectContaining({
+        ok: true,
+        initialized: true,
+        fileCount: indexResult.fileCount,
+        nodeCount: indexResult.nodeCount,
+        edgeCount: indexResult.edgeCount,
+        indexEmpty: false,
+      }),
+    );
+  });
+
+  it("keeps status payload concise", () => {
+    const root = copyFixture("minimal");
+    indexGodotProject(root);
+
+    const response = parseTextContent(callGodotMcpTool("godot_status", { projectPath: root }));
+
+    expect(response).toEqual({
+      ok: true,
+      initialized: true,
+      indexEmpty: false,
+      fileCount: 3,
+      nodeCount: expect.any(Number),
+      edgeCount: expect.any(Number),
+      unresolvedRefCount: expect.any(Number),
+      indexFresh: true,
+      pendingFiles: [],
+      watcher: "disabled",
+      lastSyncAt: expect.any(Number),
+    });
   });
 
   it("queries an indexed fixture through project map, search, and scene tools", () => {

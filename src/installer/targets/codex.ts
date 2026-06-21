@@ -9,9 +9,14 @@ import {
 
 const BEGIN_MARKER = "# godot-agent-graph:begin codex";
 const END_MARKER = "# godot-agent-graph:end codex";
+const INSTRUCTIONS_BEGIN_MARKER = "<!-- godot-agent-graph:begin codex-instructions -->";
+const INSTRUCTIONS_END_MARKER = "<!-- godot-agent-graph:end codex-instructions -->";
 const SERVER_TABLE = "mcp_servers.godot-agent-graph";
 const OWNED_BLOCK_PATTERN = new RegExp(
   `(?:^|\\n)${escapeRegExp(BEGIN_MARKER)}\\n[\\s\\S]*?${escapeRegExp(END_MARKER)}\\n?`,
+);
+const OWNED_INSTRUCTIONS_PATTERN = new RegExp(
+  `(?:^|\\n)${escapeRegExp(INSTRUCTIONS_BEGIN_MARKER)}\\n[\\s\\S]*?${escapeRegExp(INSTRUCTIONS_END_MARKER)}\\n?`,
 );
 const SERVER_TABLE_PATTERN = /^\[mcp_servers\.(?:"godot-agent-graph"|godot-agent-graph)\]/m;
 
@@ -22,6 +27,7 @@ export function installCodexTarget(options: InstallerTargetOptions): InstallerTa
 
   if (OWNED_BLOCK_PATTERN.test(current)) {
     writeTextFile(configPath, current.replace(OWNED_BLOCK_PATTERN, `\n${block}`));
+    installCodexInstructions(options);
     return {
       target: "codex",
       action: "installed",
@@ -41,6 +47,7 @@ export function installCodexTarget(options: InstallerTargetOptions): InstallerTa
 
   const separator = current.length === 0 ? "" : current.endsWith("\n") ? "\n" : "\n\n";
   writeTextFile(configPath, `${current}${separator}${block}`);
+  installCodexInstructions(options);
 
   return {
     target: "codex",
@@ -53,13 +60,16 @@ export function installCodexTarget(options: InstallerTargetOptions): InstallerTa
 export function uninstallCodexTarget(options: InstallerTargetOptions): InstallerTargetResult {
   const configPath = codexConfigPath(options.homeDir);
   const current = readTextFile(configPath);
+  const removedInstructions = uninstallCodexInstructions(options);
 
   if (!OWNED_BLOCK_PATTERN.test(current)) {
     return {
       target: "codex",
-      action: "unchanged",
+      action: removedInstructions ? "removed" : "unchanged",
       configPath,
-      message: "No owned gdgraph Codex MCP configuration was found.",
+      message: removedInstructions
+        ? "Removed owned gdgraph Codex fallback instructions."
+        : "No owned gdgraph Codex MCP configuration was found.",
     };
   }
 
@@ -87,6 +97,46 @@ args = [${launchSpec.args.map(tomlString).join(", ")}]
 enabled = true
 startup_timeout_sec = 60
 ${END_MARKER}
+`;
+}
+
+function installCodexInstructions(options: InstallerTargetOptions): void {
+  const instructionsPath = codexInstructionsPath(options.projectRoot);
+  const current = readTextFile(instructionsPath);
+  const block = codexInstructionsBlock();
+
+  if (OWNED_INSTRUCTIONS_PATTERN.test(current)) {
+    writeTextFile(instructionsPath, current.replace(OWNED_INSTRUCTIONS_PATTERN, `\n${block}`));
+    return;
+  }
+
+  const separator = current.length === 0 ? "" : current.endsWith("\n") ? "\n" : "\n\n";
+  writeTextFile(instructionsPath, `${current}${separator}${block}`);
+}
+
+function uninstallCodexInstructions(options: InstallerTargetOptions): boolean {
+  const instructionsPath = codexInstructionsPath(options.projectRoot);
+  const current = readTextFile(instructionsPath);
+  if (!OWNED_INSTRUCTIONS_PATTERN.test(current)) {
+    return false;
+  }
+
+  writeTextFile(instructionsPath, current.replace(OWNED_INSTRUCTIONS_PATTERN, ""));
+  return true;
+}
+
+function codexInstructionsPath(projectRoot: string): string {
+  return join(projectRoot, "AGENTS.md");
+}
+
+function codexInstructionsBlock(): string {
+  return `${INSTRUCTIONS_BEGIN_MARKER}
+## Godot Graph Navigation
+
+- For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool \`godot_context\` before broad file search.
+- If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\` or \`gdgraph explore <query> --path <project>\`.
+- Before edits, refactors, reviews, or debugging changes, use \`godot_impact\` or \`gdgraph impact <target> --path <project>\`.
+${INSTRUCTIONS_END_MARKER}
 `;
 }
 

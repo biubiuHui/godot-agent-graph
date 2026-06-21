@@ -91,10 +91,6 @@ export function indexGodotProject(projectRoot: string): IndexGodotProjectResult 
     upsertProjectMetadata(graph, {
       key: "index",
       value: {
-        fileCount: collected.files.length,
-        nodeCount,
-        edgeCount,
-        unresolvedRefCount,
         project: collected.projectMetadata,
       },
       updatedAt: Date.now(),

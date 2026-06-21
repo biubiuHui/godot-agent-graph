@@ -168,6 +168,7 @@ MCP 工具包括：
 
 ```text
 godot_status
+godot_context
 godot_project_map
 godot_sync
 godot_search
@@ -178,6 +179,8 @@ godot_callers
 godot_callees
 godot_impact
 ```
+
+一般 Godot 结构、脚本、场景、资源、信号、节点路径或调用链问题，优先调用 `godot_context`。它会返回简短上下文和后续建议工具。
 
 如果工具返回 `indexFresh: false`，说明图谱可能落后于当前文件。先调用 `godot_sync`，或在命令行运行 `gdgraph sync`。
 
@@ -191,10 +194,11 @@ godot_impact
 本项目使用 `gdgraph` 维护 Godot 代码图谱。
 
 - 在进行大范围源码探索前，先使用知识图谱。
-- 优先调用 `godot_status` 查看图谱状态。
+- 优先调用 `godot_context` 获取第一份图谱上下文。
+- 调用 `godot_status` 查看图谱状态。
 - 如果图谱不存在，运行 `gdgraph init <project>`。
 - 如果 `indexFresh` 为 `false`，先调用 `godot_sync`，或运行 `gdgraph sync <project>`。
-- 查找脚本、场景、资源、调用关系或影响范围时，优先使用 `godot_search`、`godot_explore`、`godot_scene`、`godot_impact`。
+- 查找脚本、场景、资源、调用关系或影响范围时，使用 `godot_search`、`godot_explore`、`godot_scene`、`godot_impact`。
 - 如果当前会话没有 MCP 工具，则使用 `gdgraph` CLI，再按需读取源码。
 ```
 
@@ -248,6 +252,7 @@ npm run gdgraph -- explore FixtureActor --path tests/fixtures/godot/minimal
 - [CLI Reference](docs/reference/cli.md)
 - [MCP Tools Reference](docs/reference/mcp.md)
 - [Installer Reference](docs/reference/install.md)
+- [Privacy And Release Guardrails](docs/reference/privacy.md)
 - [Architecture](docs/reference/architecture.md)
 - [Troubleshooting](docs/reference/troubleshooting.md)
 - [Minimal Fixture Walkthrough](examples/minimal-walkthrough.md)
