@@ -48,7 +48,7 @@ Supported target ids are:
 
 | Target | Config written |
 | --- | --- |
-| `codex` | `~/.codex/config.toml` |
+| `codex` | `~/.codex/config.toml` plus an owned project `AGENTS.md` fallback instruction block |
 | `claude` | `<project>/.mcp.json` |
 | `cursor` | `<project>/.cursor/mcp.json` |
 | `opencode` | `<project>/opencode.jsonc` or existing `<project>/opencode.json` |
@@ -78,6 +78,20 @@ startup_timeout_sec = 60
 ```
 
 Uninstall removes only this marked block. If an unmarked `[mcp_servers.godot-agent-graph]` or `[mcp_servers."godot-agent-graph"]` table already exists, install skips it instead of overwriting user configuration.
+
+For Codex, install also manages a short project `AGENTS.md` block:
+
+```markdown
+<!-- godot-agent-graph:begin codex-instructions -->
+## Godot Graph Navigation
+
+- For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool `godot_context` before broad file search.
+- If the graph is stale or missing, use `godot_status` then `godot_sync`; without MCP, run `gdgraph sync <project>` or `gdgraph explore <query> --path <project>`.
+- Before edits, refactors, reviews, or debugging changes, use `godot_impact` or `gdgraph impact <target> --path <project>`.
+<!-- godot-agent-graph:end codex-instructions -->
+```
+
+The installer replaces or removes only this marked instruction block.
 
 ## Claude Code
 
