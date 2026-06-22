@@ -51,6 +51,7 @@ describe("watcher helpers", () => {
       ],
       watcher: "active",
       lastSyncAt: 123,
+      lastSyncAtSource: "unknown",
     });
 
     tracker.clearPending(root, "res://scripts/fixture_actor.gd");

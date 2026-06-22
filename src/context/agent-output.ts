@@ -87,6 +87,7 @@ const DEFAULT_MAX_RELATIONSHIPS = 40;
 const DEFAULT_MAX_SNIPPETS = 6;
 const DEFAULT_MAX_CHARS = 8_000;
 const MIN_PREFIX_LENGTH = "res://a/b/".length;
+const MIN_RELATIONSHIPS_WHEN_TRUNCATED = 3;
 
 export function formatAgentContext(
   context: AgentContextInput,
@@ -266,6 +267,11 @@ function applyCharacterBudget(output: AgentFormattedContext, maxChars: number): 
     if (output.snippets.length > 0) {
       output.snippets.pop();
       output.omitted.snippets += 1;
+    } else if (output.relationships.length > MIN_RELATIONSHIPS_WHEN_TRUNCATED) {
+      output.relationships.pop();
+      output.omitted.relationships += 1;
+    } else if (removeUnreferencedTailNode(output)) {
+      output.omitted.nodes += 1;
     } else if (output.relationships.length > 0) {
       output.relationships.pop();
       output.omitted.relationships += 1;
@@ -283,6 +289,34 @@ function applyCharacterBudget(output: AgentFormattedContext, maxChars: number): 
     output.omitted.nodes > 0 ||
     output.omitted.relationships > 0 ||
     output.omitted.snippets > 0;
+}
+
+function removeUnreferencedTailNode(output: AgentFormattedContext): boolean {
+  const protectedNodeRefs = new Set<string>([
+    ...output.entryPoints,
+    ...relationshipNodeRefs(output.relationships),
+    ...relationshipNodeRefs(output.pathsBetween),
+    ...(output.blastRadius?.entryPoints ?? []),
+  ]);
+
+  for (let index = output.nodes.length - 1; index >= 0; index -= 1) {
+    const node = output.nodes[index];
+    if (!node || protectedNodeRefs.has(node.id)) {
+      continue;
+    }
+
+    output.nodes.splice(index, 1);
+    return true;
+  }
+
+  return false;
+}
+
+function relationshipNodeRefs(relationships: AgentFormattedRelationship[]): string[] {
+  return relationships.flatMap((relationship) => [
+    ...(relationship.from ? [relationship.from] : []),
+    ...(relationship.to ? [relationship.to] : []),
+  ]);
 }
 
 function estimatedChars(value: unknown): number {

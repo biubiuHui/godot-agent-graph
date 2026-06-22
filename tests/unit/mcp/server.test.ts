@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createCliProgram } from "../../../src/cli/index.js";
-import { createGodotMcpServer, createWatcherSyncHandler } from "../../../src/mcp/server.js";
+import {
+  createGodotMcpServer,
+  createWatcherSyncHandler,
+  inputSchemaForTool,
+} from "../../../src/mcp/server.js";
+import { listGodotMcpTools } from "../../../src/mcp/tools.js";
 
 describe("MCP server wiring", () => {
   it("constructs a server with baseline tool names", () => {
@@ -14,6 +19,27 @@ describe("MCP server wiring", () => {
       "godot_sync",
     ]);
     expect(created.server).toBeDefined();
+  });
+
+  it("exposes godot_node selectors through the server schema", () => {
+    expect(Object.keys(inputSchemaForTool("godot_node"))).toEqual(expect.arrayContaining([
+      "projectPath",
+      "id",
+      "symbol",
+      "file",
+      "offset",
+      "limit",
+      "includeCode",
+      "symbolsOnly",
+    ]));
+  });
+
+  it("keeps default server schemas aligned with tool definitions", () => {
+    for (const tool of listGodotMcpTools()) {
+      expect(Object.keys(inputSchemaForTool(tool.name)).sort()).toEqual(
+        Object.keys(tool.inputSchema.properties).sort(),
+      );
+    }
   });
 
   it("delegates gdgraph serve --mcp to the supplied serve hook", async () => {

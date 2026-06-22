@@ -6,6 +6,6 @@ export function getMcpInstructions(): string {
     "Use godot_sync only when indexFresh=false, watcher sync is unavailable, or you need an explicit catch-up before graph answers.",
     "Do not rebuild indexed Godot structure with broad grep/read; the graph already indexed scene, script, signal, resource, autoload, and input relationships.",
     "Use raw Read only for unindexed files or files listed as stale in pendingFiles/freshness metadata.",
-    "Every major tool returns indexFresh, pendingFiles, watcher, and lastSyncAt. Treat indexFresh=false conservatively and inspect only the listed stale files or run godot_sync.",
+    "Every major tool returns indexFresh, pendingFiles, watcher, lastSyncAt, and lastSyncAtSource. Treat indexFresh=false conservatively and inspect only the listed stale files or run godot_sync.",
   ].join("\n");
 }

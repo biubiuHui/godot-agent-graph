@@ -554,7 +554,9 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
       pendingFiles: [],
       watcher: "disabled",
       lastSyncAt: null,
+      lastSyncAtSource: "unknown",
       message: "No gdgraph index found. Run gdgraph init, gdgraph index, or godot_sync first.",
+      nextTools: missingIndexNextTools("initialized=false"),
     };
   }
 
@@ -575,6 +577,7 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
         ...freshness,
         indexFresh: false,
         message: "The gdgraph index exists but is empty. Run gdgraph sync, gdgraph index, or godot_sync before relying on graph answers.",
+        nextTools: missingIndexNextTools("indexEmpty=true"),
       };
     }
 
@@ -591,6 +594,15 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
   } finally {
     graph.close();
   }
+}
+
+function missingIndexNextTools(reasonState: "initialized=false" | "indexEmpty=true"): Array<Record<string, string>> {
+  return [
+    {
+      tool: "godot_sync",
+      reason: `Run manually once before graph queries when ${reasonState} or no usable gdgraph index exists.`,
+    },
+  ];
 }
 
 function jsonToolResult(payload: unknown): GodotMcpToolResult {

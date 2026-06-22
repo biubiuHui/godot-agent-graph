@@ -19,15 +19,12 @@ export function getGraphFreshness(
 ): GraphFreshness {
   const syncMetadata = getProjectMetadata(graph, "sync");
   const indexMetadata = getProjectMetadata(graph, "index");
-  const lastSyncAt =
-    getNumber(syncMetadata?.value, "lastSyncAt") ??
-    syncMetadata?.updatedAt ??
-    indexMetadata?.updatedAt ??
-    null;
+  const timestamp = freshnessTimestamp(syncMetadata, indexMetadata);
 
   return globalPendingFileTracker.getFreshness(projectRoot, {
     watcher,
-    lastSyncAt,
+    lastSyncAt: timestamp.lastSyncAt,
+    lastSyncAtSource: timestamp.source,
   });
 }
 
@@ -93,6 +90,26 @@ export function attachFreshness(
 function getNumber(value: Record<string, unknown> | undefined, key: string): number | null {
   const field = value?.[key];
   return typeof field === "number" ? field : null;
+}
+
+function freshnessTimestamp(
+  syncMetadata: ReturnType<typeof getProjectMetadata>,
+  indexMetadata: ReturnType<typeof getProjectMetadata>,
+): { lastSyncAt: number | null; source: GraphFreshness["lastSyncAtSource"] } {
+  const syncValueTimestamp = getNumber(syncMetadata?.value, "lastSyncAt");
+  if (syncValueTimestamp !== null) {
+    return { lastSyncAt: syncValueTimestamp, source: "sync" };
+  }
+
+  if (syncMetadata?.updatedAt !== undefined) {
+    return { lastSyncAt: syncMetadata.updatedAt, source: "sync" };
+  }
+
+  if (indexMetadata?.updatedAt !== undefined) {
+    return { lastSyncAt: indexMetadata.updatedAt, source: "index" };
+  }
+
+  return { lastSyncAt: null, source: "unknown" };
 }
 
 function mergePendingFiles(left: PendingFile[], right: PendingFile[]): PendingFile[] {

@@ -21,6 +21,8 @@ The MCP server's default visible tools are:
 
 Use `godot_context` first for ordinary Godot understanding, flow, structure, and edit-planning tasks. Use `godot_node` whenever you would otherwise read an indexed Godot file or named symbol. Do not rebuild indexed Godot structure with broad grep/read loops. Raw file reads are only for unindexed files, files listed as stale, or external validation such as compiler/test output.
 
+`godot_context` does not auto-bootstrap arbitrary `projectPath` values. For a new worktree, copied project, missing `.gdgraph/graph.db`, or empty index, call `godot_sync` manually once, then retry `godot_context`. Missing-index responses include `nextTools: [{ "tool": "godot_sync", ... }]` to make this recovery path explicit.
+
 Legacy focused handlers such as `godot_search`, `godot_scene`, `godot_explore`, `godot_symbol`, `godot_callers`, `godot_callees`, `godot_impact`, and `godot_project_map` remain callable for compatibility and debugging, but they are no longer the default agent tool surface.
 
 ## Freshness Contract
@@ -33,16 +35,20 @@ Most graph query responses include:
   "pendingFiles": [],
   "watcher": "disabled",
   "lastSyncAt": 1780000000000,
+  "lastSyncAtSource": "sync",
   "freshness": {
     "indexFresh": true,
     "pendingFiles": [],
     "watcher": "disabled",
-    "lastSyncAt": 1780000000000
+    "lastSyncAt": 1780000000000,
+    "lastSyncAtSource": "sync"
   }
 }
 ```
 
 When `indexFresh` is false, the graph may not include pending file changes. Call `godot_sync` or inspect the listed files before treating results as final.
+
+Use `indexFresh` and `pendingFiles` as the authoritative freshness signal. `lastSyncAtSource` is diagnostic metadata: `"sync"` means explicit sync metadata, `"index"` means the timestamp fell back to index metadata, and `"unknown"` means an older or manually altered index has no usable timestamp.
 
 Stale graph query responses also include `stale: true`, `staleFileCount`, and `staleFiles` as a concise action list. `pendingFiles` remains the structured compatibility field.
 
@@ -58,6 +64,8 @@ Input:
 
 Returns a concise health check: initialization state, live graph counts, `indexEmpty`, and flat freshness fields.
 
+When `initialized:false` or `indexEmpty:true`, the response is a recoverable setup state. Run `godot_sync` manually once for that project path before relying on graph queries.
+
 ## godot_context
 
 Input:
@@ -72,6 +80,8 @@ Input:
 ```
 
 Primary first call for ordinary Godot code, scene, resource, signal, node-path, call-chain, flow, and edit-planning questions. Returns concise status fields, live graph counts, bounded context, and graph-native next steps when more context is needed.
+
+If the project has no usable index, `godot_context` returns the same missing-index recovery payload as `godot_status` instead of silently indexing. Agents should call `godot_sync` manually, then retry the original context query.
 
 `context` uses the compact agent format:
 

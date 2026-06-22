@@ -54,6 +54,7 @@ describe("MCP Godot tools", () => {
     expect(instructions).toContain("Do not rebuild indexed Godot structure with broad grep/read");
     expect(instructions).toContain("raw Read only for unindexed files or files listed as stale");
     expect(instructions).toContain("indexFresh");
+    expect(instructions).toContain("lastSyncAtSource");
     expect(instructions).toContain("godot_sync");
     expect(instructions).not.toContain("godot_project_map");
     expect(instructions).not.toContain("For focused follow-up, use godot_search and godot_scene");
@@ -130,6 +131,7 @@ describe("MCP Godot tools", () => {
           indexFresh: true,
           pendingFiles: [],
           lastSyncAt: expect.any(Number),
+          lastSyncAtSource: "sync",
         }),
       }),
     );
@@ -159,6 +161,7 @@ describe("MCP Godot tools", () => {
         pendingFiles: [],
         watcher: "disabled",
         lastSyncAt: expect.any(Number),
+        lastSyncAtSource: "index",
         context: expect.objectContaining({
           query: "FixtureActor",
           paths: expect.objectContaining({
@@ -204,6 +207,40 @@ describe("MCP Godot tools", () => {
       }),
     );
     expect(response.context as Record<string, unknown>).not.toHaveProperty("files");
+  });
+
+  it("uses a godot_context graphId as a godot_node target", () => {
+    const root = copyFixture("minimal");
+    indexGodotProject(root);
+
+    const contextResponse = parseTextContent(
+      callGodotMcpTool("godot_context", {
+        projectPath: root,
+        query: "FixtureActor",
+        includeCode: false,
+      }),
+    );
+    const context = contextResponse.context as Record<string, unknown>;
+    const nodes = context.nodes as Array<Record<string, unknown>>;
+    const graphId = nodes.find((node) => node.kind === "script_class")?.graphId;
+    expect(graphId).toBe("script:res://scripts/fixture_actor.gd");
+
+    expect(
+      parseTextContent(callGodotMcpTool("godot_node", { projectPath: root, id: graphId })),
+    ).toEqual(
+      expect.objectContaining({
+        ok: true,
+        target: expect.objectContaining({
+          id: graphId,
+          kind: "script_class",
+          filePath: "res://scripts/fixture_actor.gd",
+        }),
+        source: expect.objectContaining({
+          filePath: "res://scripts/fixture_actor.gd",
+          text: expect.stringContaining("class_name FixtureActor"),
+        }),
+      }),
+    );
   });
 
   it("formats primary context with compact path and relationship tables", () => {
@@ -302,6 +339,12 @@ describe("MCP Godot tools", () => {
         initialized: false,
         indexFresh: false,
         message: expect.stringContaining("No gdgraph index"),
+        nextTools: [
+          expect.objectContaining({
+            tool: "godot_sync",
+            reason: expect.stringContaining("initialized=false"),
+          }),
+        ],
       }),
     );
   });
@@ -319,6 +362,12 @@ describe("MCP Godot tools", () => {
         ok: false,
         initialized: false,
         indexFresh: false,
+        nextTools: [
+          expect.objectContaining({
+            tool: "godot_sync",
+            reason: expect.stringContaining("initialized=false"),
+          }),
+        ],
       }),
     );
     expect(response).not.toHaveProperty("projectRoot");
@@ -341,6 +390,12 @@ describe("MCP Godot tools", () => {
         indexEmpty: true,
         indexFresh: false,
         message: expect.stringContaining("empty"),
+        nextTools: [
+          expect.objectContaining({
+            tool: "godot_sync",
+            reason: expect.stringContaining("indexEmpty=true"),
+          }),
+        ],
       }),
     );
   });
@@ -396,6 +451,30 @@ describe("MCP Godot tools", () => {
     );
   });
 
+  it("reports unknown freshness timestamp source when sync and index metadata are missing", () => {
+    const root = copyFixture("minimal");
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      graph.sqlite.prepare("delete from project_metadata where key in ('sync', 'index')").run();
+    } finally {
+      graph.close();
+    }
+
+    expect(parseTextContent(callGodotMcpTool("godot_status", { projectPath: root }))).toEqual(
+      expect.objectContaining({
+        ok: true,
+        initialized: true,
+        indexFresh: true,
+        pendingFiles: [],
+        lastSyncAt: null,
+        lastSyncAtSource: "unknown",
+      }),
+    );
+  });
+
   it("keeps status payload concise", () => {
     const root = copyFixture("minimal");
     indexGodotProject(root);
@@ -414,6 +493,7 @@ describe("MCP Godot tools", () => {
       pendingFiles: [],
       watcher: "disabled",
       lastSyncAt: expect.any(Number),
+      lastSyncAtSource: "index",
     });
   });
 

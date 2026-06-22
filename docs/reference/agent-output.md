@@ -117,6 +117,12 @@ When either side of an edge is outside the visible node set, the formatter keeps
 
 File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source.
 
+## Missing Index Recovery
+
+`godot_context` and other graph-backed tools do not silently create an index for arbitrary `projectPath` values. When a new worktree, copied project, or empty graph returns `initialized:false` or `indexEmpty:true`, call `godot_sync` manually once for that project path, then retry the original graph query.
+
+Missing-index payloads include `nextTools` guidance so agents can treat this as a normal setup step instead of a terminal query failure.
+
 ## Budgets And Truncation
 
 Agent output uses hard response budgets to avoid large payloads:

@@ -102,7 +102,8 @@ Recommended agent flow:
 
 1. Call `godot_context`.
 2. If source is needed, pass the returned `graphId` to `godot_node`.
-3. If `indexFresh` is `false`, call `godot_sync`.
+3. If `initialized` is `false` or `indexEmpty` is `true`, call `godot_sync` manually once, then retry `godot_context`.
+4. If `indexFresh` is `false`, call `godot_sync`.
 
 Do not use broad `grep`, glob, or raw file-reading loops to rebuild structure that is already indexed. Raw reads are still useful for unindexed files, files reported as stale, and external validation such as tests or compiler output.
 
@@ -118,6 +119,7 @@ This project uses `gdgraph` for indexed Godot structure.
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, call `godot_context` before broad file search.
 - Use `godot_node` to read indexed Godot source for a file, symbol, or graph node id.
 - Use `godot_status` to check graph freshness.
+- If `initialized` is false or `indexEmpty` is true, call `godot_sync` once before graph queries.
 - If `indexFresh` is false, call `godot_sync` or run `gdgraph sync <project>`.
 - Do not rebuild indexed Godot structure with broad `grep`, glob, or raw file-reading loops.
 - Directly read raw files only when a file is unindexed, listed as stale, or needed for external validation.

@@ -13,11 +13,13 @@ export interface GraphFreshness {
   pendingFiles: PendingFile[];
   watcher: WatcherState;
   lastSyncAt: number | null;
+  lastSyncAtSource: "sync" | "index" | "unknown";
 }
 
 export interface FreshnessOptions {
   watcher?: WatcherState;
   lastSyncAt?: number | null;
+  lastSyncAtSource?: GraphFreshness["lastSyncAtSource"];
 }
 
 export interface PendingFileTracker {
@@ -95,6 +97,7 @@ export function createPendingFileTracker(): PendingFileTracker {
         pendingFiles,
         watcher: options.watcher ?? "disabled",
         lastSyncAt: options.lastSyncAt ?? null,
+        lastSyncAtSource: options.lastSyncAtSource ?? "unknown",
       };
     },
   };

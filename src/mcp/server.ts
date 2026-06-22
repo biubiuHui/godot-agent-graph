@@ -118,7 +118,7 @@ export function createWatcherSyncHandler(
   };
 }
 
-function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAny> {
+export function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAny> {
   if (toolName === "godot_search") {
     return {
       projectPath: z.string().optional(),
@@ -156,6 +156,19 @@ function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAny> {
     return {
       projectPath: z.string().optional(),
       target: z.string(),
+    };
+  }
+
+  if (toolName === "godot_node") {
+    return {
+      projectPath: z.string().optional(),
+      id: z.string().optional(),
+      symbol: z.string().optional(),
+      file: z.string().optional(),
+      offset: z.number().optional(),
+      limit: z.number().optional(),
+      includeCode: z.boolean().optional(),
+      symbolsOnly: z.boolean().optional(),
     };
   }
 

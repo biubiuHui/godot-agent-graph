@@ -235,6 +235,78 @@ describe("agent output formatter", () => {
     ]);
   });
 
+  it("preserves focused relationships before lower-value nodes when truncated", () => {
+    const fillerNodes = Array.from({ length: 24 }, (_, index) => ({
+      id: `property:res://scripts/sample/filler_${index}.gd:SAMPLE_VALUE_${index}`,
+      kind: "property",
+      name: `SAMPLE_VALUE_${index}`,
+      qualifiedName: `SampleFiller${index}.SAMPLE_VALUE_${index}`,
+      filePath: `res://scripts/sample/filler_${index}.gd`,
+      startLine: 3,
+      signature: `const SAMPLE_VALUE_${index} := "${"x".repeat(80)}"`,
+    }));
+
+    const output = formatAgentContext(
+      {
+        query: "SampleScreen SampleTimeline",
+        entryPoints: [
+          "script:res://scripts/sample/sample_screen.gd",
+          "script:res://scripts/sample/sample_timeline.gd",
+        ],
+        nodes: [
+          {
+            id: "script:res://scripts/sample/sample_screen.gd",
+            kind: "script_class",
+            name: "SampleScreen",
+            qualifiedName: "SampleScreen",
+            filePath: "res://scripts/sample/sample_screen.gd",
+            startLine: 1,
+            signature: "class_name SampleScreen",
+          },
+          {
+            id: "script:res://scripts/sample/sample_timeline.gd",
+            kind: "script_class",
+            name: "SampleTimeline",
+            qualifiedName: "SampleTimeline",
+            filePath: "res://scripts/sample/sample_timeline.gd",
+            startLine: 1,
+            signature: "class_name SampleTimeline",
+          },
+          ...fillerNodes,
+        ],
+        relationships: [
+          "script:res://scripts/sample/sample_screen.gd calls script:res://scripts/sample/sample_timeline.gd (resolver)",
+          "script:res://scripts/sample/sample_screen.gd references_symbol SAMPLE_VALUE_0 (unresolved)",
+          "script:res://scripts/sample/sample_timeline.gd references_symbol SAMPLE_VALUE_1 (unresolved)",
+        ],
+        files: [
+          "res://scripts/sample/sample_screen.gd",
+          "res://scripts/sample/sample_timeline.gd",
+          ...fillerNodes.map((node) => node.filePath),
+        ],
+        snippets: [],
+      },
+      {
+        maxChars: 1_600,
+        maxNodes: 30,
+        maxRelationships: 10,
+        maxSnippets: 0,
+      },
+    );
+
+    expect(output.truncated).toBe(true);
+    expect(output.omitted.nodes).toBeGreaterThan(0);
+    expect(output.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        from: "n1",
+        kind: "calls",
+        to: "n2",
+        provenance: "resolver",
+      }),
+    ]));
+    expect(output.budget.estimatedChars).toBeLessThanOrEqual(1_600);
+  });
+
   it("formats paths between entry points with compact ids", () => {
     const output = formatAgentContext({
       query: "ScreenController TimelineBuilder",
