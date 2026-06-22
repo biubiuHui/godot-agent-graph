@@ -22,6 +22,7 @@ export const EDGE_KINDS = [
   "calls",
   "emits_signal",
   "connects_signal",
+  "references_symbol",
   "references_nodepath",
   "loads_resource",
   "preloads_resource",

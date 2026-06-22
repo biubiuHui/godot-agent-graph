@@ -6,7 +6,7 @@ import { upsertProjectMetadata } from "../db/queries.js";
 import { listIndexedFiles } from "../graph/queries.js";
 import { indexGodotProject } from "../indexer/indexer.js";
 import { scanGodotProject, type GodotProjectScanOk } from "../indexer/scan.js";
-import { withGraphLock } from "./lock.js";
+import { GraphLockError, withGraphLock } from "./lock.js";
 
 export interface SyncGodotProjectOk {
   ok: true;
@@ -21,6 +21,8 @@ export interface SyncGodotProjectOk {
   unresolvedRefCount: number;
   parseErrors: string[];
   lastSyncAt: number;
+  changeScope: "graph_index";
+  message: string;
 }
 
 export interface SyncGodotProjectError {
@@ -37,7 +39,17 @@ interface CurrentFileHash {
   contentHash: string;
 }
 
-export function syncGodotProject(projectRoot: string): SyncGodotProjectResult {
+export interface SyncGodotProjectOptions {
+  lockRetryMs?: number;
+  lockRetryIntervalMs?: number;
+}
+
+const GRAPH_INDEX_DELTA_MESSAGE = "added, modified, and deleted describe graph index changes, not Git status.";
+
+export function syncGodotProject(
+  projectRoot: string,
+  options: SyncGodotProjectOptions = {},
+): SyncGodotProjectResult {
   const scan = scanGodotProject(projectRoot);
   if (!scan.ok) {
     return {
@@ -48,7 +60,22 @@ export function syncGodotProject(projectRoot: string): SyncGodotProjectResult {
     };
   }
 
-  return withGraphLock(scan.root, () => syncScannedGodotProject(scan));
+  try {
+    return withGraphLock(scan.root, () => syncScannedGodotProject(scan), {
+      retryMs: options.lockRetryMs,
+      retryIntervalMs: options.lockRetryIntervalMs,
+    });
+  } catch (error) {
+    if (error instanceof GraphLockError) {
+      return {
+        ok: false,
+        projectRoot: scan.root,
+        reason: "locked",
+        message: error.message,
+      };
+    }
+    throw error;
+  }
 }
 
 function syncScannedGodotProject(scan: GodotProjectScanOk): SyncGodotProjectResult {
@@ -131,6 +158,8 @@ function syncScannedGodotProject(scan: GodotProjectScanOk): SyncGodotProjectResu
     unresolvedRefCount: indexed.unresolvedRefCount,
     parseErrors: indexed.parseErrors,
     lastSyncAt,
+    changeScope: "graph_index",
+    message: GRAPH_INDEX_DELTA_MESSAGE,
   };
 }
 

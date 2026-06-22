@@ -69,9 +69,12 @@ describe("watcher helpers", () => {
 
     expect(() =>
       withGraphLock(root, () => {
-        withGraphLock(root, () => "nested");
+        withGraphLock(root, () => "nested", {
+          retryMs: 10,
+          retryIntervalMs: 1,
+        });
       }),
-    ).toThrow(/already locked/);
+    ).toThrow(/temporarily locked/);
   });
 
   it("recovers from an empty stale graph lock", () => {

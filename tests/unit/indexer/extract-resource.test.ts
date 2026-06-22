@@ -83,22 +83,22 @@ describe("extractGodotResourceGraph", () => {
       parseGodotResource(
         `[gd_scene format=3]
 
-[node name="InspectorItem" type="PanelContainer"]
+[node name="ExampleEntry" type="PanelContainer"]
 
 [connection signal="focus_entered" from="." to="." method="_on_focus_entered"]
 `,
-        "res://addons/example_plugin/editor/inspector_item.tscn",
+        "res://addons/example_plugin/editor/example_entry.tscn",
       ),
       { updatedAt: 2500 },
     );
 
     expect(graph.nodes.map((node) => node.id)).toContain(
-      "scene_node:res://addons/example_plugin/editor/inspector_item.tscn:InspectorItem",
+      "scene_node:res://addons/example_plugin/editor/example_entry.tscn:ExampleEntry",
     );
     expect(graph.unresolvedRefs).toEqual([
       expect.objectContaining({
         fromNodeId:
-          "scene_node:res://addons/example_plugin/editor/inspector_item.tscn:InspectorItem",
+          "scene_node:res://addons/example_plugin/editor/example_entry.tscn:ExampleEntry",
         referenceName: "_on_focus_entered",
         referenceKind: "editor_signal_connection",
       }),

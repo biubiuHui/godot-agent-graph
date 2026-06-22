@@ -81,6 +81,13 @@ export interface GdscriptAutoloadCandidate {
   scope?: GdscriptReferenceScope | null;
 }
 
+export interface GdscriptSymbolRef {
+  name: string;
+  receiver: string | null;
+  line: number;
+  scope?: GdscriptReferenceScope | null;
+}
+
 export interface GdscriptReferenceScope {
   ownerName: string | null;
   methodName: string;
@@ -107,6 +114,7 @@ export interface GdscriptParseResult {
   nodeRefs: GdscriptNodeRef[];
   inputActions: GdscriptInputActionRef[];
   autoloadCandidates: GdscriptAutoloadCandidate[];
+  symbolRefs: GdscriptSymbolRef[];
   errors: GdscriptParseError[];
 }
 
@@ -391,6 +399,7 @@ export function parseGdscript(contents: string, filePath: string): GdscriptParse
     nodeRefs: [],
     inputActions: [],
     autoloadCandidates: [],
+    symbolRefs: [],
     errors: [],
   };
 
@@ -561,6 +570,7 @@ function parseReferences(
   collectSignalUsage(line, lineNumber, result, callableAliases, scope);
   collectCalls(line, lineNumber, result, scope);
   collectAutoloadCandidates(line, lineNumber, result, scope);
+  collectSymbolRefs(line, lineNumber, result, scope);
 }
 
 function collectResourceRefs(
@@ -840,6 +850,114 @@ function collectAutoloadCandidates(
       line: lineNumber,
     });
   }
+}
+
+function collectSymbolRefs(
+  line: string,
+  lineNumber: number,
+  result: GdscriptParseResult,
+  scope: GdscriptReferenceScope | null,
+): void {
+  const sourceLine = symbolRefSourceLine(line);
+  if (sourceLine.length === 0) {
+    return;
+  }
+
+  const stringMask = createStringMask(sourceLine);
+  const codeOnlyLine = maskStringLiterals(sourceLine, stringMask);
+  const dottedRanges: Array<[number, number]> = [];
+  const refs: GdscriptSymbolRef[] = [];
+
+  for (const match of codeOnlyLine.matchAll(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)\b(?!\s*\()/g)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    dottedRanges.push([start, end]);
+    const name = match[2] ?? "";
+    if (isIgnoredSymbolRefName(name)) {
+      continue;
+    }
+    refs.push({
+      name,
+      receiver: match[1] ?? null,
+      line: lineNumber,
+      scope,
+    });
+  }
+
+  for (const match of codeOnlyLine.matchAll(/\b([A-Za-z_]\w*)\b/g)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const name = match[1] ?? "";
+    if (
+      isRangeInside(dottedRanges, start, end) ||
+      isIgnoredSymbolRefName(name) ||
+      !isBareSymbolRefName(name) ||
+      isCallName(codeOnlyLine, end)
+    ) {
+      continue;
+    }
+    refs.push({
+      name,
+      receiver: null,
+      line: lineNumber,
+      scope,
+    });
+  }
+
+  result.symbolRefs.push(...uniqueSymbolRefs(refs));
+}
+
+function symbolRefSourceLine(line: string): string {
+  if (
+    /^(static\s+)?func\s+/.test(line) ||
+    /^signal\s+/.test(line) ||
+    /^class(?:_name)?\s+/.test(line) ||
+    /^extends\s+/.test(line)
+  ) {
+    return "";
+  }
+
+  const declaration = line.match(/^(?:@export\s+)?(?:var|const)\s+[A-Za-z_]\w*\b/);
+  if (!declaration) {
+    return line;
+  }
+
+  const assignment = line.match(/(?::=|=)(.+)$/);
+  return assignment?.[1] ?? "";
+}
+
+function isRangeInside(ranges: Array<[number, number]>, start: number, end: number): boolean {
+  return ranges.some(([rangeStart, rangeEnd]) => start >= rangeStart && end <= rangeEnd);
+}
+
+function isCallName(line: string, endIndex: number): boolean {
+  return /^\s*\(/.test(line.slice(endIndex));
+}
+
+function isBareSymbolRefName(name: string): boolean {
+  return /^[A-Z][A-Za-z0-9_]*$/.test(name) || /^[A-Z0-9_]+$/.test(name);
+}
+
+function isIgnoredSymbolRefName(name: string): boolean {
+  return (
+    CALL_EXCLUSIONS.has(name) ||
+    name === "self" ||
+    name === "true" ||
+    name === "false" ||
+    name === "null"
+  );
+}
+
+function uniqueSymbolRefs(refs: GdscriptSymbolRef[]): GdscriptSymbolRef[] {
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = `${ref.receiver ?? ""}\0${ref.name}\0${ref.line}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function cleanCallableTarget(value: string, callableAliases: Map<string, string>): string | null {

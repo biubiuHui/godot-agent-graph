@@ -270,7 +270,7 @@ signal fixture_feedback_requested
       `extends Node
 class_name SignalCaller
 
-func _ensure_fixture_connections() -> void:
+func _connect_example_signal() -> void:
 \tFixtureFx.fixture_feedback_requested.connect(_on_fixture_feedback_requested)
 
 func _on_fixture_feedback_requested() -> void:
@@ -294,7 +294,7 @@ func _on_fixture_feedback_requested() -> void:
       expect(listEdges(graph, { kind: "connects_signal" })).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            source: "method:res://scripts/signal_caller.gd:_ensure_fixture_connections",
+            source: "method:res://scripts/signal_caller.gd:_connect_example_signal",
             target: "signal:res://scripts/fixture_fx.gd:fixture_feedback_requested",
             provenance: "resolver",
           }),
@@ -528,17 +528,17 @@ func validate() -> PackedStringArray:
 `,
     );
     writeFileSync(
-      join(root, "scripts", "fixture_snapshot.gd"),
+      join(root, "scripts", "fixture_payload.gd"),
       `extends RefCounted
-class_name FixtureSnapshot
+class_name FixturePayload
 `,
     );
     writeFileSync(
-      join(root, "scripts", "metric_widget.gd"),
+      join(root, "scripts", "example_panel.gd"),
       `extends Node
-class_name MetricWidget
+class_name ExamplePanel
 
-func apply_fixture(snapshot: FixtureSnapshot) -> void:
+func apply_payload(payload: FixturePayload) -> void:
 \tpass
 `,
     );
@@ -547,7 +547,7 @@ func apply_fixture(snapshot: FixtureSnapshot) -> void:
       `extends Node
 class_name OtherPanel
 
-func apply_fixture(snapshot: FixtureSnapshot) -> void:
+func apply_payload(payload: FixturePayload) -> void:
 \tpass
 `,
     );
@@ -572,13 +572,13 @@ func inspect_local_type() -> void:
 \tvar item: FixtureItem = FixtureItem.new()
 \titem.validate()
 
-func inspect_cast(snapshot: FixtureSnapshot) -> void:
-\tvar metric_widget := make_panel() as MetricWidget
-\tmetric_widget.apply_fixture(snapshot)
+func inspect_cast(payload: FixturePayload) -> void:
+\tvar example_panel := make_panel() as ExamplePanel
+\texample_panel.apply_payload(payload)
 
-func inspect_helper_return(snapshot: FixtureSnapshot) -> void:
-\tvar metric_widget := make_metric_widget()
-\tmetric_widget.apply_fixture(snapshot)
+func inspect_helper_return(payload: FixturePayload) -> void:
+\tvar example_panel := make_example_panel()
+\texample_panel.apply_payload(payload)
 
 func inspect_preload_constructor() -> void:
 \tvar repository := FixtureRepositoryScript.new()
@@ -587,8 +587,8 @@ func inspect_preload_constructor() -> void:
 func make_panel() -> Node:
 \treturn Node.new()
 
-func make_metric_widget() -> MetricWidget:
-\treturn MetricWidget.new()
+func make_example_panel() -> ExamplePanel:
+\treturn ExamplePanel.new()
 `,
     );
     const result = indexGodotProject(root);
@@ -610,7 +610,7 @@ func make_metric_widget() -> MetricWidget:
           }),
           expect.objectContaining({
             source: "method:res://scripts/caller.gd:inspect_cast",
-            target: "method:res://scripts/metric_widget.gd:apply_fixture",
+            target: "method:res://scripts/example_panel.gd:apply_payload",
             provenance: "resolver",
           }),
           expect.objectContaining({
@@ -627,7 +627,7 @@ func make_metric_widget() -> MetricWidget:
             (
               ref.referenceName === "get_item" ||
               ref.referenceName === "validate" ||
-              ref.referenceName === "apply_fixture"
+              ref.referenceName === "apply_payload"
             ) &&
             ref.filePath === "res://scripts/caller.gd",
         ),

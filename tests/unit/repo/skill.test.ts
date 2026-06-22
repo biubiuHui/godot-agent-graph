@@ -29,8 +29,10 @@ describe("repository Godot graph navigation skill", () => {
       expect(skill).toContain(trigger);
     }
     expect(skill).toContain("godot_context");
-    expect(skill).toContain("godot_impact");
+    expect(skill).toContain("godot_node");
+    expect(skill).toContain("godot_sync");
     expect(skill).toContain("gdgraph");
+    expect(skill).toContain("broad file search");
   });
 
   it("does not include obvious local private paths", () => {

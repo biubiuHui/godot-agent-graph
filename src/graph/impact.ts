@@ -22,6 +22,7 @@ export interface ImpactContext {
   affectedResources: ImpactNodeSummary[];
   relationships: string[];
   recommendedCheckFiles: string[];
+  omitted: ImpactOmittedSummary;
 }
 
 export interface ImpactNodeSummary {
@@ -34,10 +35,15 @@ export interface ImpactNodeSummary {
   signature: string | null;
 }
 
+export interface ImpactOmittedSummary {
+  nodes: number;
+  relationships: number;
+}
+
 const MAX_IMPACT_SCENES = 20;
 const MAX_IMPACT_SCRIPTS = 30;
 const MAX_IMPACT_RESOURCES = 25;
-const MAX_IMPACT_RELATIONSHIPS = 120;
+const MAX_IMPACT_RELATIONSHIPS = 40;
 const MAX_IMPACT_CHECK_FILES = 20;
 
 export function getImpactContext(graph: GraphDatabase, targetQuery: string): ImpactContext {
@@ -51,32 +57,27 @@ export function getImpactContext(graph: GraphDatabase, targetQuery: string): Imp
       affectedResources: [],
       relationships: [],
       recommendedCheckFiles: [],
+      omitted: { nodes: 0, relationships: 0 },
     };
   }
 
   const related: GraphNode[] = [target];
   const relationships: string[] = [];
+  const selectedRelationships = new Set<string>();
+  const graphEdges = visibleEdges(snapshot);
 
   for (const edge of [...incomingEdges(snapshot, target.id), ...outgoingEdges(snapshot, target.id)]) {
-    relationships.push(explainEdge(edge));
-    const other = snapshot.nodes.find((node) => node.id === (edge.source === target.id ? edge.target : edge.source));
-    if (other) {
-      related.push(other);
-    }
+    addRelationship(relationships, selectedRelationships, explainEdge(edge));
+    addRelatedNode(snapshot.nodes, related, edge.source === target.id ? edge.target : edge.source);
   }
 
   for (const ref of [...refsFrom(snapshot, target.id), ...refsMatching(snapshot, target.name)]) {
-    relationships.push(explainUnresolvedRef(ref));
-    const source = snapshot.nodes.find((node) => node.id === ref.fromNodeId);
-    if (source) {
-      related.push(source);
-    }
+    addRelationship(relationships, selectedRelationships, explainUnresolvedRef(ref));
+    addRelatedNode(snapshot.nodes, related, ref.fromNodeId);
   }
 
-  const graphEdges = visibleEdges(snapshot);
-  const neighborhoodDepth = target.kind === "resource" || target.kind === "scene_node" ? 0 : 2;
-  expandNeighborhood(snapshot.nodes, graphEdges, related, relationships, neighborhoodDepth);
-  expandSceneContainers(snapshot.nodes, graphEdges, related);
+  addStructuralImpactContext(snapshot.nodes, graphEdges, related, relationships, selectedRelationships);
+  const omitted = omittedBroadImpact(snapshot.nodes, graphEdges, target, related, selectedRelationships);
 
   const unique = uniqueNodes(related);
   const affected = unique.filter((node) => node.id !== target.id);
@@ -94,7 +95,32 @@ export function getImpactContext(graph: GraphDatabase, targetQuery: string): Imp
     affectedResources: affectedResources.map(summarizeImpactNode),
     relationships: prioritizeRelationships(uniqueStrings(relationships)).slice(0, MAX_IMPACT_RELATIONSHIPS),
     recommendedCheckFiles,
+    omitted,
   };
+}
+
+function addRelationship(
+  relationships: string[],
+  selectedRelationships: Set<string>,
+  relationship: string,
+): void {
+  if (selectedRelationships.has(relationship)) {
+    return;
+  }
+  relationships.push(relationship);
+  selectedRelationships.add(relationship);
+}
+
+function addRelatedNode(nodes: GraphNode[], related: GraphNode[], nodeId: string): boolean {
+  if (related.some((node) => node.id === nodeId)) {
+    return false;
+  }
+  const node = nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) {
+    return false;
+  }
+  related.push(node);
+  return true;
 }
 
 function summarizeImpactNode(node: GraphNode): ImpactNodeSummary {
@@ -146,24 +172,53 @@ function expandNeighborhood(
   }
 }
 
-function expandSceneContainers(
+function addStructuralImpactContext(
   nodes: GraphNode[],
-  edges: Array<{ source: string; target: string; kind: string }>,
+  edges: Array<{ source: string; target: string; kind: string; provenance?: string }>,
   related: GraphNode[],
+  relationships: string[],
+  selectedRelationships: Set<string>,
 ): void {
   let changed = true;
   while (changed) {
     changed = false;
     const ids = new Set(related.map((node) => node.id));
     for (const edge of edges) {
-      if (edge.kind !== "contains" || !ids.has(edge.target) || ids.has(edge.source)) {
-        continue;
-      }
-      const source = nodes.find((node) => node.id === edge.source);
-      if (source) {
-        related.push(source);
-        changed = true;
+      if (edge.kind === "contains" && ids.has(edge.target)) {
+        addRelationship(relationships, selectedRelationships, edgeToRelationship(edge));
+        changed = addRelatedNode(nodes, related, edge.source) || changed;
+      } else if (edge.kind === "attaches_script" && ids.has(edge.target)) {
+        const source = nodes.find((node) => node.id === edge.source);
+        if (source?.kind === "scene_node") {
+          addRelationship(relationships, selectedRelationships, edgeToRelationship(edge));
+          changed = addRelatedNode(nodes, related, edge.source) || changed;
+        }
       }
     }
   }
+}
+
+function omittedBroadImpact(
+  nodes: GraphNode[],
+  edges: Array<{ source: string; target: string; kind: string; provenance?: string }>,
+  target: GraphNode,
+  selectedNodes: GraphNode[],
+  selectedRelationships: Set<string>,
+): ImpactOmittedSummary {
+  const broadNodes: GraphNode[] = [...selectedNodes];
+  const broadRelationships: string[] = [];
+  const neighborhoodDepth = target.kind === "resource" || target.kind === "scene_node" ? 0 : 2;
+  expandNeighborhood(nodes, edges, broadNodes, broadRelationships, neighborhoodDepth);
+
+  const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
+  return {
+    nodes: uniqueNodes(broadNodes).filter((node) => !selectedNodeIds.has(node.id)).length,
+    relationships: uniqueStrings(broadRelationships).filter((relationship) =>
+      !selectedRelationships.has(relationship)
+    ).length,
+  };
+}
+
+function edgeToRelationship(edge: { source: string; target: string; kind: string; provenance?: string }): string {
+  return `${edge.source} ${edge.kind} ${edge.target} (${edge.provenance ?? "graph"})`;
 }

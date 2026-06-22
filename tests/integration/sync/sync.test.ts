@@ -10,6 +10,7 @@ import { getNode, listEdges, searchNodes } from "../../../src/db/queries.js";
 import { getSceneDetails } from "../../../src/graph/queries.js";
 import { indexGodotProject } from "../../../src/indexer/indexer.js";
 import { syncGodotProject } from "../../../src/sync/index.js";
+import { withGraphLock } from "../../../src/sync/lock.js";
 
 const fixturesRoot = fileURLToPath(new URL("../../fixtures/godot", import.meta.url));
 const tempRoots: string[] = [];
@@ -45,6 +46,8 @@ describe("syncGodotProject", () => {
       expect(result.added).toEqual(["res://scripts/new_spell.gd"]);
       expect(result.modified).toEqual([]);
       expect(result.deleted).toEqual([]);
+      expect(result.changeScope).toBe("graph_index");
+      expect(result.message).toContain("graph index");
     }
 
     const graph = createGraphDatabase(root);
@@ -112,5 +115,24 @@ script = ExtResource("1_fixture_actor")
     } finally {
       graph.close();
     }
+  });
+
+  it("returns a structured error when sync cannot acquire a live graph lock", () => {
+    const root = indexedFixture("minimal");
+
+    const result = withGraphLock(root, () =>
+      syncGodotProject(root, {
+        lockRetryMs: 10,
+        lockRetryIntervalMs: 1,
+      }),
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: "locked",
+        message: expect.stringContaining("temporarily locked"),
+      }),
+    );
   });
 });

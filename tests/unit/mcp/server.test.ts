@@ -10,15 +10,8 @@ describe("MCP server wiring", () => {
     expect(created.toolNames).toEqual([
       "godot_status",
       "godot_context",
-      "godot_project_map",
+      "godot_node",
       "godot_sync",
-      "godot_search",
-      "godot_scene",
-      "godot_explore",
-      "godot_symbol",
-      "godot_callers",
-      "godot_callees",
-      "godot_impact",
     ]);
     expect(created.server).toBeDefined();
   });

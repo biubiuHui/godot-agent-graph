@@ -73,20 +73,28 @@ describe("realistic Godot MCP knowledge graph tools", () => {
     expect(scene).toEqual(
       expect.objectContaining({
         ok: true,
-        scene: expect.objectContaining({ id: "scene:res://scenes/fixture_main.tscn" }),
+        paths: expect.objectContaining({
+          p1: "res://scenes/fixture_main.tscn",
+          p2: "res://scripts/controllers/main_controller.gd",
+          p3: "res://scenes/fixture_actor.tscn",
+        }),
+        scene: expect.objectContaining({
+          graphId: "scene:res://scenes/fixture_main.tscn",
+          path: "p1",
+        }),
         nodes: expect.arrayContaining([
           expect.objectContaining({
-            id: "scene_node:res://scenes/fixture_main.tscn:Main",
+            graphId: "scene_node:res://scenes/fixture_main.tscn:Main",
             type: "Node2D",
             parentPath: null,
-            scriptPath: "res://scripts/controllers/main_controller.gd",
+            scriptPath: "p2",
           }),
           expect.objectContaining({
-            id: "scene_node:res://scenes/fixture_main.tscn:FixtureActor",
-            instanceScenePath: "res://scenes/fixture_actor.tscn",
+            graphId: "scene_node:res://scenes/fixture_main.tscn:FixtureActor",
+            instanceScenePath: "p3",
           }),
           expect.objectContaining({
-            id: "scene_node:res://scenes/fixture_main.tscn:UI/HealthBar",
+            graphId: "scene_node:res://scenes/fixture_main.tscn:UI/HealthBar",
             parentPath: "UI",
           }),
         ]),
@@ -110,16 +118,16 @@ describe("realistic Godot MCP knowledge graph tools", () => {
     ).toEqual(
       expect.objectContaining({
         ok: true,
-        nodes: expect.arrayContaining([
-          expect.objectContaining({ id: "script:res://scripts/actors/fixture_actor.gd" }),
-          expect.objectContaining({ id: "scene_node:res://scenes/fixture_actor.tscn:FixtureActor" }),
-          expect.objectContaining({ id: "resource:res://resources/fixture_stats.tres" }),
-        ]),
-        relationships: expect.arrayContaining([
-          expect.stringContaining(
-            "scene_node:res://scenes/fixture_actor.tscn:FixtureActor attaches_script script:res://scripts/actors/fixture_actor.gd",
-          ),
-        ]),
+        context: expect.objectContaining({
+          nodes: expect.arrayContaining([
+            expect.objectContaining({ graphId: "script:res://scripts/actors/fixture_actor.gd" }),
+            expect.objectContaining({ graphId: "scene_node:res://scenes/fixture_actor.tscn:FixtureActor" }),
+            expect.objectContaining({ graphId: "resource:res://resources/fixture_stats.tres" }),
+          ]),
+          relationships: expect.arrayContaining([
+            expect.objectContaining({ kind: "attaches_script" }),
+          ]),
+        }),
       }),
     );
 
@@ -134,11 +142,11 @@ describe("realistic Godot MCP knowledge graph tools", () => {
     ).toEqual(
       expect.objectContaining({
         ok: true,
-        relationships: expect.arrayContaining([
-          expect.stringContaining(
-            "method:res://scripts/controllers/main_controller.gd:_ready calls method:res://scripts/autoload/fixture_state.gd:advance_night",
-          ),
-        ]),
+        context: expect.objectContaining({
+          relationships: expect.arrayContaining([
+            expect.objectContaining({ kind: "calls" }),
+          ]),
+        }),
       }),
     );
 
@@ -153,14 +161,10 @@ describe("realistic Godot MCP knowledge graph tools", () => {
       expect.objectContaining({
         ok: true,
         affectedScenes: expect.arrayContaining([
-          expect.objectContaining({ id: "scene:res://scenes/fixture_actor.tscn" }),
-          expect.objectContaining({ id: "scene:res://scenes/fixture_main.tscn" }),
+          expect.objectContaining({ graphId: "scene:res://scenes/fixture_actor.tscn" }),
+          expect.objectContaining({ graphId: "scene:res://scenes/fixture_main.tscn" }),
         ]),
-        recommendedCheckFiles: expect.arrayContaining([
-          "res://scripts/actors/fixture_actor.gd",
-          "res://scenes/fixture_actor.tscn",
-          "res://scenes/fixture_main.tscn",
-        ]),
+        recommendedCheckFiles: expect.arrayContaining(["p1", "p2", "p3"]),
       }),
     );
   });

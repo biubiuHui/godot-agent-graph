@@ -66,6 +66,7 @@ function relationshipPriority(value: string): number {
   if (
     value.includes(" uses_autoload ") ||
     value.includes(" uses_input_action ") ||
+    value.includes(" references_symbol ") ||
     value.includes(" references_nodepath ")
   ) {
     return 25;
@@ -142,6 +143,7 @@ function resolvedEdgeKinds(ref: UnresolvedRef): EdgeKind[] {
     ref.referenceKind === "loads_resource" ||
     ref.referenceKind === "main_scene" ||
     ref.referenceKind === "preloads_resource" ||
+    ref.referenceKind === "references_symbol" ||
     ref.referenceKind === "references_nodepath" ||
     ref.referenceKind === "uses_autoload" ||
     ref.referenceKind === "uses_input_action"

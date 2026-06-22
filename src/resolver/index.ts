@@ -219,6 +219,11 @@ function resolveUnresolvedRefs(
           resolved = addResolved(ref.fromNodeId, target.id, "references_nodepath", { candidates: ref.candidates }) || resolved;
         }
       }
+    } else if (ref.referenceKind === "references_symbol") {
+      const target = symbolReferenceTarget(ref, nodes, indexes, projectRoot, sourceCache);
+      if (target) {
+        resolved = addResolved(ref.fromNodeId, target.id, "references_symbol", { candidates: ref.candidates });
+      }
     } else if (ref.referenceKind === "extends") {
       const pathTarget = ref.referenceName.startsWith("res://")
         ? indexes.scriptsByPath.get(ref.referenceName)
@@ -321,6 +326,60 @@ function signalConnectSignalTarget(
 function callReceiver(ref: UnresolvedRef): string | null {
   const receiver = ref.candidates.find((candidate) => typeof candidate.receiver === "string")?.receiver;
   return typeof receiver === "string" && receiver.length > 0 ? receiver : null;
+}
+
+function symbolReferenceTarget(
+  ref: UnresolvedRef,
+  nodes: GraphNode[],
+  indexes: ReturnType<typeof buildGodotPathIndexes>,
+  projectRoot: string,
+  sourceCache: Map<string, string[] | null>,
+): GraphNode | null {
+  const receiver = callReceiver(ref);
+  if (receiver) {
+    if (receiver === "self") {
+      return uniqueSymbolTarget(nodes, ref.referenceName, ref.filePath);
+    }
+
+    const receiverClass = receiverTypeName(ref, receiver, nodes, projectRoot, sourceCache) ?? receiver;
+    const scriptClass = uniqueNode(
+      (indexes.byName.get(receiverClass) ?? []).filter((node) => node.kind === "script_class"),
+    );
+    return scriptClass?.filePath
+      ? uniqueSymbolTarget(nodes, ref.referenceName, scriptClass.filePath)
+      : null;
+  }
+
+  const sameFileTarget = uniqueSymbolTarget(nodes, ref.referenceName, ref.filePath);
+  if (sameFileTarget) {
+    return sameFileTarget;
+  }
+
+  return uniqueNode(
+    nodes.filter((node) =>
+      symbolTargetKinds(ref.referenceName).has(node.kind) &&
+      node.name === ref.referenceName,
+    ),
+  );
+}
+
+function uniqueSymbolTarget(nodes: GraphNode[], name: string, filePath: string): GraphNode | null {
+  const allowedKinds = symbolTargetKinds(name);
+  return uniqueNode(
+    nodes.filter((node) =>
+      allowedKinds.has(node.kind) &&
+      node.name === name &&
+      node.filePath === filePath,
+    ),
+  );
+}
+
+function symbolTargetKinds(name: string): Set<GraphNode["kind"]> {
+  const kinds: GraphNode["kind"][] = ["property", "signal", "method", "inner_class"];
+  if (/^[A-Z][A-Za-z0-9_]*$/.test(name)) {
+    kinds.push("script_class");
+  }
+  return new Set(kinds);
 }
 
 function autoloadReceiverCallTarget(

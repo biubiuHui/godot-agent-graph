@@ -75,9 +75,17 @@ export function attachFreshness(
   payload: Record<string, unknown>,
   freshness: GraphFreshness,
 ): Record<string, unknown> {
+  const staleFiles = freshness.pendingFiles.map((file) => file.path).sort();
   return {
     ...payload,
     ...freshness,
+    ...(!freshness.indexFresh
+      ? {
+          stale: true,
+          staleFileCount: staleFiles.length,
+          staleFiles,
+        }
+      : {}),
     freshness,
   };
 }

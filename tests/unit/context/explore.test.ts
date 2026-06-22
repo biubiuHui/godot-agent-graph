@@ -97,6 +97,190 @@ afterEach(() => {
 });
 
 describe("agent context queries", () => {
+  it("preserves exact entry point symbols in broad natural-language queries", () => {
+    const graph = createTempGraph();
+    try {
+      function insertScriptClass(name: string, path: string): void {
+        addFile(graph, path);
+        addNode(graph, `script:${path}`, "script_class", name, name, path);
+      }
+
+      for (let index = 0; index < 14; index += 1) {
+        insertScriptClass(`ModuleNoise${index}`, `res://scripts/module_noise_${index}.gd`);
+      }
+      insertScriptClass("ExactAlphaController", "res://scripts/exact_alpha_controller.gd");
+      insertScriptClass("ExactBetaTimeline", "res://scripts/exact_beta_timeline.gd");
+      insertScriptClass("ExactActionPanel", "res://scripts/exact_action_panel.gd");
+      insertScriptClass("ExactMainScreen", "res://scripts/exact_main_screen.gd");
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "Module 6 broad fixture event flow ExactAlphaController ExactBetaTimeline ExactActionPanel ExactMainScreen",
+        includeCode: false,
+      });
+      const entryPointNames = context.entryPoints
+        .map((id) => context.nodes.find((node) => node.id === id)?.name)
+        .filter(Boolean);
+
+      expect(entryPointNames.slice(0, 4)).toEqual(
+        expect.arrayContaining([
+          "ExactAlphaController",
+          "ExactBetaTimeline",
+          "ExactActionPanel",
+          "ExactMainScreen",
+        ]),
+      );
+      const noiseIndex = entryPointNames.indexOf("ModuleNoise0");
+      if (noiseIndex >= 0) {
+        expect(entryPointNames.indexOf("ExactAlphaController")).toBeLessThan(noiseIndex);
+      }
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("returns focused direct paths between entry points", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/screen_controller.gd");
+      addFile(graph, "res://scripts/timeline_builder.gd");
+      addNode(
+        graph,
+        "script:res://scripts/screen_controller.gd",
+        "script_class",
+        "ScreenController",
+        "ScreenController",
+        "res://scripts/screen_controller.gd",
+      );
+      addNode(
+        graph,
+        "script:res://scripts/timeline_builder.gd",
+        "script_class",
+        "TimelineBuilder",
+        "TimelineBuilder",
+        "res://scripts/timeline_builder.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/screen_controller.gd:_ready",
+        "method",
+        "_ready",
+        "ScreenController._ready",
+        "res://scripts/screen_controller.gd",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/screen_controller.gd",
+        "calls",
+        "script:res://scripts/timeline_builder.gd",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/screen_controller.gd",
+        "contains",
+        "method:res://scripts/screen_controller.gd:_ready",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "ScreenController TimelineBuilder flow",
+        includeCode: false,
+      });
+
+      expect(context.pathsBetween).toEqual([
+        "script:res://scripts/screen_controller.gd calls script:res://scripts/timeline_builder.gd (resolver)",
+      ]);
+      expect(context.pathsBetween).not.toEqual(
+        expect.arrayContaining([expect.stringContaining(" contains ")]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps edit blast radius check files focused on direct relationships", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/target_service.gd");
+      addFile(graph, "res://scripts/direct_panel.gd");
+      addFile(graph, "res://scripts/unrelated_service.gd");
+      addNode(
+        graph,
+        "script:res://scripts/target_service.gd",
+        "script_class",
+        "TargetService",
+        "TargetService",
+        "res://scripts/target_service.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/target_service.gd:target_method",
+        "method",
+        "target_method",
+        "TargetService.target_method",
+        "res://scripts/target_service.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/direct_panel.gd:call_target",
+        "method",
+        "call_target",
+        "DirectPanel.call_target",
+        "res://scripts/direct_panel.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/direct_panel.gd:unrelated_branch",
+        "method",
+        "unrelated_branch",
+        "DirectPanel.unrelated_branch",
+        "res://scripts/direct_panel.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/unrelated_service.gd:unrelated_method",
+        "method",
+        "unrelated_method",
+        "UnrelatedService.unrelated_method",
+        "res://scripts/unrelated_service.gd",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/target_service.gd",
+        "contains",
+        "method:res://scripts/target_service.gd:target_method",
+      );
+      addEdge(
+        graph,
+        "method:res://scripts/direct_panel.gd:call_target",
+        "calls",
+        "method:res://scripts/target_service.gd:target_method",
+      );
+      addEdge(
+        graph,
+        "method:res://scripts/direct_panel.gd:unrelated_branch",
+        "calls",
+        "method:res://scripts/unrelated_service.gd:unrelated_method",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "change target_method",
+        includeCode: false,
+      });
+
+      expect(context.blastRadius?.checkFiles).toEqual(
+        expect.arrayContaining([
+          "res://scripts/target_service.gd",
+          "res://scripts/direct_panel.gd",
+        ]),
+      );
+      expect(context.blastRadius?.checkFiles).not.toContain("res://scripts/unrelated_service.gd");
+    } finally {
+      graph.close();
+    }
+  });
+
   it("explores related Godot context with relationship explanations and bounded snippets", () => {
     const root = indexedFixture("minimal");
     const graph = createGraphDatabase(root);
@@ -460,7 +644,7 @@ signal fixture_feedback_requested
       `extends Node
 class_name SignalCaller
 
-func _ensure_fixture_connections() -> void:
+func _connect_example_signal() -> void:
 \tFixtureFx.fixture_feedback_requested.connect(_on_fixture_feedback_requested)
 
 func _on_fixture_feedback_requested() -> void:
@@ -479,11 +663,183 @@ func _on_fixture_feedback_requested() -> void:
       });
 
       expect(callers.relationships).toContain(
-        "method:res://scripts/signal_caller.gd:_ensure_fixture_connections connects_signal signal:res://scripts/fixture_fx.gd:fixture_feedback_requested (resolver)",
+        "method:res://scripts/signal_caller.gd:_connect_example_signal connects_signal signal:res://scripts/fixture_fx.gd:fixture_feedback_requested (resolver)",
       );
       expect(callers.relationships).not.toContain(
-        "method:res://scripts/signal_caller.gd:_ensure_fixture_connections connects_signal fixture_feedback_requested (unresolved)",
+        "method:res://scripts/signal_caller.gd:_connect_example_signal connects_signal fixture_feedback_requested (unresolved)",
       );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("shows callers for class constant references", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "step_catalog.gd"),
+      `extends Node
+class_name StepCatalog
+
+const FIXTURE_STEP_NAME := "fixture_step"
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "step_reader.gd"),
+      `extends Node
+class_name StepReader
+
+func play() -> void:
+\tif StepCatalog.FIXTURE_STEP_NAME == "fixture_step":
+\t\tpass
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const callers = getCallersContext(graph, {
+        projectRoot: root,
+        symbol: "FIXTURE_STEP_NAME",
+        includeCode: false,
+        maxFiles: 10,
+      });
+
+      expect(callers.nodes.map((node) => node.id)).toContain(
+        "property:res://scripts/step_catalog.gd:FIXTURE_STEP_NAME",
+      );
+      expect(callers.files).toContain("res://scripts/step_catalog.gd");
+      expect(callers.files).toContain("res://scripts/step_reader.gd");
+      expect(callers.relationships).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "method:res://scripts/step_reader.gd:play references_symbol property:res://scripts/step_catalog.gd:FIXTURE_STEP_NAME",
+          ),
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps ambiguous same-name symbol references unresolved", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "first_catalog.gd"),
+      `extends Node
+class_name FirstCatalog
+
+const SHARED_VALUE := 1
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "second_catalog.gd"),
+      `extends Node
+class_name SecondCatalog
+
+const SHARED_VALUE := 2
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "ambiguous_reader.gd"),
+      `extends Node
+class_name AmbiguousReader
+
+func read_value() -> int:
+\treturn SHARED_VALUE
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const callers = getCallersContext(graph, {
+        projectRoot: root,
+        symbol: "SHARED_VALUE",
+        includeCode: false,
+        maxFiles: 10,
+      });
+
+      expect(callers.relationships).toEqual(
+        expect.arrayContaining([
+          "method:res://scripts/ambiguous_reader.gd:read_value references_symbol SHARED_VALUE (unresolved)",
+        ]),
+      );
+      expect(callers.relationships).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "method:res://scripts/ambiguous_reader.gd:read_value references_symbol property:res://scripts/first_catalog.gd:SHARED_VALUE",
+          ),
+        ]),
+      );
+      expect(callers.relationships).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "method:res://scripts/ambiguous_reader.gd:read_value references_symbol property:res://scripts/second_catalog.gd:SHARED_VALUE",
+          ),
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("documents current includeCode snippets start at file heads", () => {
+    const root = indexedFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "many_lines.gd"),
+      `extends Node
+class_name ManyLines
+
+func intro() -> void:
+\tpass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+func target_method() -> void:
+\tpass
+`,
+    );
+    writeFileSync(
+      join(root, "scripts", "snippet_caller.gd"),
+      `extends Node
+class_name SnippetCaller
+
+func call_it() -> void:
+\ttarget_method()
+`,
+    );
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      const callers = getCallersContext(graph, {
+        projectRoot: root,
+        symbol: "target_method",
+        includeCode: true,
+        maxFiles: 8,
+      });
+      const manyLinesSnippet = callers.snippets.find(
+        (snippet) => snippet.filePath === "res://scripts/many_lines.gd",
+      );
+
+      expect(manyLinesSnippet).toEqual(expect.objectContaining({ startLine: 1 }));
+      expect(manyLinesSnippet?.text).not.toContain("func target_method");
     } finally {
       graph.close();
     }

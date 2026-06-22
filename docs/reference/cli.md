@@ -58,7 +58,7 @@ Alias for `gdgraph clean [path]`. It removes the project's `.gdgraph` storage di
 gdgraph sync [path]
 ```
 
-Detects added, modified, and deleted Godot files, then refreshes the graph. The result includes `added`, `modified`, `deleted`, and corresponding counts.
+Detects added, modified, and deleted Godot files, then refreshes the graph. The result includes `added`, `modified`, `deleted`, corresponding counts, and `changeScope: "graph_index"`. These arrays describe graph index changes, not Git status.
 
 ## status
 

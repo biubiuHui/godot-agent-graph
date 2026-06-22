@@ -174,4 +174,71 @@ describe("graph storage queries", () => {
       graph.close();
     }
   });
+
+  it("preserves exact symbols in long natural-language queries", () => {
+    const graph = createGraphDatabase(createTempProjectRoot());
+
+    try {
+      function insertScriptClass(name: string, path: string): void {
+        upsertFile(graph, {
+          path,
+          kind: "gdscript",
+          contentHash: path,
+          size: 1,
+          modifiedAt: 1,
+          indexedAt: 1,
+          nodeCount: 1,
+          parseErrors: [],
+        });
+        upsertNode(graph, {
+          id: `script:${path}`,
+          kind: "script_class",
+          name,
+          qualifiedName: name,
+          filePath: path,
+          startLine: 1,
+          endLine: null,
+          signature: `class_name ${name}`,
+          metadata: {},
+          updatedAt: 1,
+        });
+      }
+
+      for (let index = 0; index < 14; index += 1) {
+        insertScriptClass(`ModuleNoise${index}`, `res://scripts/module_noise_${index}.gd`);
+      }
+      insertScriptClass("ExactAlphaController", "res://scripts/exact_alpha_controller.gd");
+      insertScriptClass("ExactBetaTimeline", "res://scripts/exact_beta_timeline.gd");
+      insertScriptClass("ExactActionPanel", "res://scripts/exact_action_panel.gd");
+      insertScriptClass("ExactMainScreen", "res://scripts/exact_main_screen.gd");
+
+      const results = searchNodes(
+        graph,
+        "Module 6 broad fixture event flow ExactAlphaController ExactBetaTimeline ExactActionPanel ExactMainScreen",
+        10,
+      );
+      const resultNames = results.map((node) => node.name);
+      const firstNoiseIndex = resultNames.findIndex((name) => name.startsWith("ModuleNoise"));
+
+      expect(resultNames).toEqual(
+        expect.arrayContaining([
+          "ExactAlphaController",
+          "ExactBetaTimeline",
+          "ExactActionPanel",
+          "ExactMainScreen",
+        ]),
+      );
+      expect(firstNoiseIndex).toBeGreaterThanOrEqual(0);
+      for (const exactName of [
+        "ExactAlphaController",
+        "ExactBetaTimeline",
+        "ExactActionPanel",
+        "ExactMainScreen",
+      ]) {
+        expect(resultNames.indexOf(exactName)).toBeLessThan(firstNoiseIndex);
+      }
+    } finally {
+      graph.close();
+    }
+  });
 });

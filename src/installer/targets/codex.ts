@@ -134,8 +134,9 @@ function codexInstructionsBlock(): string {
 ## Godot Graph Navigation
 
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool \`godot_context\` before broad file search.
+- Use \`godot_node\` for indexed Godot source reads instead of raw file reads.
 - If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\` or \`gdgraph explore <query> --path <project>\`.
-- Before edits, refactors, reviews, or debugging changes, use \`godot_impact\` or \`gdgraph impact <target> --path <project>\`.
+- Before edits, refactors, reviews, or debugging changes, use \`godot_context\` for edit-planning and blast-radius context; use \`godot_impact\` only when a dedicated compatibility impact report is needed.
 ${INSTRUCTIONS_END_MARKER}
 `;
 }

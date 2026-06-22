@@ -245,4 +245,123 @@ describe("impact context", () => {
       graph.close();
     }
   });
+
+  it("omits unrelated second-hop branches from script impact", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/target_service.gd", "gdscript");
+      addFile(graph, "res://scripts/direct_panel.gd", "gdscript");
+      addFile(graph, "res://scripts/unrelated_service.gd", "gdscript");
+      addNode(
+        graph,
+        "script:res://scripts/target_service.gd",
+        "script_class",
+        "TargetService",
+        "res://scripts/target_service.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/target_service.gd:target_method",
+        "method",
+        "target_method",
+        "res://scripts/target_service.gd",
+      );
+      addNode(
+        graph,
+        "script:res://scripts/direct_panel.gd",
+        "script_class",
+        "DirectPanel",
+        "res://scripts/direct_panel.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/direct_panel.gd:call_target",
+        "method",
+        "call_target",
+        "res://scripts/direct_panel.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/direct_panel.gd:unrelated_branch",
+        "method",
+        "unrelated_branch",
+        "res://scripts/direct_panel.gd",
+      );
+      addNode(
+        graph,
+        "script:res://scripts/unrelated_service.gd",
+        "script_class",
+        "UnrelatedService",
+        "res://scripts/unrelated_service.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/unrelated_service.gd:unrelated_method",
+        "method",
+        "unrelated_method",
+        "res://scripts/unrelated_service.gd",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/target_service.gd",
+        "contains",
+        "method:res://scripts/target_service.gd:target_method",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/direct_panel.gd",
+        "contains",
+        "method:res://scripts/direct_panel.gd:call_target",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/direct_panel.gd",
+        "contains",
+        "method:res://scripts/direct_panel.gd:unrelated_branch",
+      );
+      addEdge(
+        graph,
+        "method:res://scripts/direct_panel.gd:call_target",
+        "calls",
+        "method:res://scripts/target_service.gd:target_method",
+      );
+      addEdge(
+        graph,
+        "method:res://scripts/direct_panel.gd:unrelated_branch",
+        "calls",
+        "method:res://scripts/unrelated_service.gd:unrelated_method",
+      );
+      addEdge(
+        graph,
+        "script:res://scripts/unrelated_service.gd",
+        "contains",
+        "method:res://scripts/unrelated_service.gd:unrelated_method",
+      );
+
+      const impact = getImpactContext(graph, "target_method");
+
+      expect(impact.relationships).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "method:res://scripts/direct_panel.gd:call_target calls method:res://scripts/target_service.gd:target_method",
+          ),
+        ]),
+      );
+      expect(impact.relationships).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("method:res://scripts/direct_panel.gd:unrelated_branch"),
+        ]),
+      );
+      expect(impact.recommendedCheckFiles).toEqual(
+        expect.arrayContaining([
+          "res://scripts/target_service.gd",
+          "res://scripts/direct_panel.gd",
+        ]),
+      );
+      expect(impact.recommendedCheckFiles).not.toContain("res://scripts/unrelated_service.gd");
+      expect(impact.omitted.relationships).toBeGreaterThan(0);
+    } finally {
+      graph.close();
+    }
+  });
 });

@@ -26,6 +26,9 @@ Symptom:
 ```json
 {
   "indexFresh": false,
+  "stale": true,
+  "staleFileCount": 1,
+  "staleFiles": ["res://scripts/fixture_actor.gd"],
   "pendingFiles": [
     { "path": "res://scripts/fixture_actor.gd", "indexing": false }
   ]
@@ -45,6 +48,28 @@ godot_sync
 ```
 
 If you are about to edit or rely on a pending file, read that file directly or sync first.
+
+## Sync change arrays look like Git status
+
+`gdgraph sync` and `godot_sync` report graph index deltas:
+
+- `added`
+- `modified`
+- `deleted`
+
+These fields describe which Godot files changed in the graph index since the previous index, not Git working tree status. Check `changeScope`; it should be `graph_index`.
+
+## Graph database is temporarily locked
+
+Another index or sync operation is currently writing `.gdgraph`. The tool retries briefly before returning a structured locked error.
+
+Wait a moment and run:
+
+```bash
+gdgraph sync /path/to/godot/project
+```
+
+From MCP, call `godot_sync` again. If the error persists, check for a long-running indexing process.
 
 ## Watcher is disabled or degraded
 

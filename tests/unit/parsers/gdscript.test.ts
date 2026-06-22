@@ -144,11 +144,11 @@ func _ready() -> void:
       `extends Node
 
 func _ready() -> void:
-\tFixtureEvent.create("night_start")
+\tExampleEvent.create("sample_event")
 \tFileAccess.open("user://save.json", FileAccess.READ)
 \tDirAccess.open("res://")
 \tscreen.open({})
-\tfixture_state.grid_state.get_item(Vector2i.ZERO)
+\tsample_context.sample_store.get_entry(Vector2i.ZERO)
 \tnight_color.lerp(dawn_color, t).lerp(day_color, t)
 \tlocal_helper()
 `,
@@ -158,7 +158,7 @@ func _ready() -> void:
     expect(result.calls).toMatchObject([
       {
         name: "create",
-        receiver: "FixtureEvent",
+        receiver: "ExampleEvent",
         line: 4,
       },
       {
@@ -167,8 +167,8 @@ func _ready() -> void:
         line: 7,
       },
       {
-        name: "get_item",
-        receiver: "fixture_state.grid_state",
+        name: "get_entry",
+        receiver: "sample_context.sample_store",
         line: 8,
       },
       {
@@ -232,6 +232,56 @@ func _ready() -> void:
       {
         name: "FixtureSaveService",
         line: 8,
+      },
+    ]);
+  });
+
+  it("parses ordinary symbol read references", () => {
+    const result = parseGdscript(
+      `extends Node
+class_name SymbolReadUser
+
+const DEFAULT_LIMIT := 3
+
+func play(catalog: StepCatalog) -> void:
+\tif StepCatalog.FIXTURE_STEP_NAME == DEFAULT_LIMIT:
+\t\tcatalog.current_step = StepCatalog.FIXTURE_STEP_NAME
+\t\tvar local_value := DEFAULT_LIMIT
+\t\tprint("StepCatalog.FIXTURE_STEP_NAME")
+`,
+      "res://scripts/symbol_read_user.gd",
+    );
+
+    expect(result.symbolRefs).toEqual([
+      {
+        name: "FIXTURE_STEP_NAME",
+        receiver: "StepCatalog",
+        line: 7,
+        scope: { ownerName: null, methodName: "play", methodLine: 6 },
+      },
+      {
+        name: "DEFAULT_LIMIT",
+        receiver: null,
+        line: 7,
+        scope: { ownerName: null, methodName: "play", methodLine: 6 },
+      },
+      {
+        name: "current_step",
+        receiver: "catalog",
+        line: 8,
+        scope: { ownerName: null, methodName: "play", methodLine: 6 },
+      },
+      {
+        name: "FIXTURE_STEP_NAME",
+        receiver: "StepCatalog",
+        line: 8,
+        scope: { ownerName: null, methodName: "play", methodLine: 6 },
+      },
+      {
+        name: "DEFAULT_LIMIT",
+        receiver: null,
+        line: 9,
+        scope: { ownerName: null, methodName: "play", methodLine: 6 },
       },
     ]);
   });
@@ -339,24 +389,24 @@ static func build() -> void:
     const result = parseGdscript(
       `extends Control
 
-@onready var dish_icon: TextureRect = $%DishIcon
+@onready var sample_icon: TextureRect = $%SampleIcon
 
 func _ready() -> void:
-\t$%CookButton.pressed.connect(_on_cook_pressed)
+\t$%ActionButton.pressed.connect(_on_action_pressed)
 `,
-      "res://scenes/ui/cell_item.gd",
+      "res://scenes/ui/sample_card.gd",
     );
 
     expect(result.errors).toEqual([]);
     expect(result.nodeRefs).toMatchObject([
       {
         kind: "unique",
-        path: "DishIcon",
+        path: "SampleIcon",
         line: 3,
       },
       {
         kind: "unique",
-        path: "CookButton",
+        path: "ActionButton",
         line: 6,
       },
     ]);
@@ -588,7 +638,7 @@ static func create_item(
 \tposition: Vector2i = Vector2i.ZERO
 ) -> Dictionary:
 \tvar result := {}
-\tvar fixture_data := null
+\tvar payload_value := null
 \tresult["id"] = item_id
 \treturn result
 `,

@@ -9,6 +9,7 @@ import type {
   GdscriptResourceRef,
   GdscriptSignalConnect,
   GdscriptSignalEmit,
+  GdscriptSymbolRef,
 } from "../parsers/gdscript.js";
 import type { GraphEdge, GraphNode, UnresolvedRef } from "../types.js";
 
@@ -313,6 +314,16 @@ function addUnresolvedRefs(
       ),
     );
   }
+
+  for (const symbolRef of script.symbolRefs) {
+    unresolvedRefs.push(
+      symbolRefUnresolved(
+        script,
+        sourceNodeId(script, scriptId, symbolRef.scope, duplicateMethods),
+        symbolRef,
+      ),
+    );
+  }
 }
 
 function resourceUnresolved(
@@ -385,6 +396,21 @@ function inputActionUnresolved(
   inputAction: GdscriptInputActionRef,
 ): UnresolvedRef {
   return unresolved(script, fromNodeId, inputAction.name, "uses_input_action", inputAction.line, []);
+}
+
+function symbolRefUnresolved(
+  script: GdscriptParseResult,
+  fromNodeId: string,
+  symbolRef: GdscriptSymbolRef,
+): UnresolvedRef {
+  return unresolved(
+    script,
+    fromNodeId,
+    symbolRef.name,
+    "references_symbol",
+    symbolRef.line,
+    symbolRef.receiver ? [{ receiver: symbolRef.receiver }] : [],
+  );
 }
 
 function sourceNodeId(

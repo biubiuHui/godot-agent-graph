@@ -6,12 +6,31 @@ interface GraphLockMetadata {
   startedAt: number;
 }
 
-export function withGraphLock<T>(projectRoot: string, callback: () => T): T {
+export interface GraphLockOptions {
+  retryMs?: number;
+  retryIntervalMs?: number;
+}
+
+const DEFAULT_RETRY_MS = 120;
+const DEFAULT_RETRY_INTERVAL_MS = 20;
+
+export class GraphLockError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GraphLockError";
+  }
+}
+
+export function withGraphLock<T>(
+  projectRoot: string,
+  callback: () => T,
+  options: GraphLockOptions = {},
+): T {
   const graphDir = join(projectRoot, ".gdgraph");
   mkdirSync(graphDir, { recursive: true });
 
   const lockPath = join(graphDir, "graph.lock");
-  const fileDescriptor = acquireGraphLock(lockPath);
+  const fileDescriptor = acquireGraphLock(lockPath, options);
 
   try {
     return callback();
@@ -21,7 +40,10 @@ export function withGraphLock<T>(projectRoot: string, callback: () => T): T {
   }
 }
 
-function acquireGraphLock(lockPath: string): number {
+function acquireGraphLock(lockPath: string, options: GraphLockOptions): number {
+  const retryMs = options.retryMs ?? DEFAULT_RETRY_MS;
+  const retryIntervalMs = options.retryIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS;
+  const deadline = Date.now() + Math.max(0, retryMs);
   for (;;) {
     try {
       const fileDescriptor = openSync(lockPath, "wx");
@@ -33,10 +55,22 @@ function acquireGraphLock(lockPath: string): number {
       }
 
       if (!removeStaleLock(lockPath)) {
-        throw new Error(`Graph database is already locked: ${lockPath}`);
+        if (Date.now() >= deadline) {
+          throw new GraphLockError(`Graph database is temporarily locked: ${lockPath}`);
+        }
+        sleep(Math.min(retryIntervalMs, Math.max(0, deadline - Date.now())));
       }
     }
   }
+}
+
+function sleep(ms: number): void {
+  if (ms <= 0) {
+    return;
+  }
+  const buffer = new SharedArrayBuffer(4);
+  const view = new Int32Array(buffer);
+  Atomics.wait(view, 0, 0, ms);
 }
 
 function currentLockMetadata(): GraphLockMetadata {

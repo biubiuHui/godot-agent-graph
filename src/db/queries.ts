@@ -61,6 +61,8 @@ interface UnresolvedRefRow {
   candidates: string;
 }
 
+const MAX_SEARCH_TERMS = 48;
+
 export function upsertFile(graph: GraphDatabase, file: GraphFile): void {
   graph.sqlite
     .prepare(
@@ -177,14 +179,24 @@ export function searchNodes(graph: GraphDatabase, query: string, limit = 20): Gr
   }
 
   const rowLimit = limit * 2;
-  let rows = searchRows(graph, trimmedQuery, rowLimit);
-  let uniqueRows = filterSupersededRows(graph, uniqueRowsById(rows));
+  const terms = queryToRankingTerms(trimmedQuery);
+  let rows = [
+    ...searchRows(graph, trimmedQuery, rowLimit),
+    ...terms.flatMap((term) => searchRows(graph, term, rowLimit)),
+  ];
+  let uniqueRows = rankSearchRows(
+    filterSupersededRows(graph, uniqueRowsById(rows)),
+    terms,
+  );
 
   if (uniqueRows.length === 0) {
     const tokens = queryToSearchTokens(trimmedQuery);
     if (tokens.length > 1) {
       rows = tokens.flatMap((token) => searchRows(graph, token, rowLimit));
-      uniqueRows = filterSupersededRows(graph, uniqueRowsById(rows));
+      uniqueRows = rankSearchRows(
+        filterSupersededRows(graph, uniqueRowsById(rows)),
+        terms,
+      );
     }
   }
 
@@ -200,6 +212,103 @@ function queryToFtsMatch(query: string): string {
 
 function queryToSearchTokens(query: string): string[] {
   return query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+}
+
+function queryToRankingTerms(query: string): string[] {
+  const pathTerms = query.match(/res:\/\/[^\s"',)]+/g) ?? [];
+  const identifierTerms = query.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+  const fileTerms = pathTerms.flatMap((term) => {
+    const basename = pathBasename(term);
+    return basename ? [basename] : [];
+  });
+
+  return uniqueStrings([
+    query,
+    ...pathTerms,
+    ...fileTerms,
+    ...identifierTerms.filter((term) =>
+      term.includes("_") ||
+      /[a-z][A-Z]/.test(term) ||
+      /^[A-Z][A-Za-z0-9_]*$/.test(term),
+    ),
+    ...queryToSearchTokens(query),
+  ]).slice(0, MAX_SEARCH_TERMS);
+}
+
+function rankSearchRows(rows: NodeRow[], terms: string[]): NodeRow[] {
+  return rows
+    .map((row, index) => ({
+      row,
+      index,
+      score: searchRowScore(row, terms),
+    }))
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.index - right.index ||
+      left.row.qualified_name.localeCompare(right.row.qualified_name),
+    )
+    .map((item) => item.row);
+}
+
+function searchRowScore(row: NodeRow, terms: string[]): number {
+  let score = kindSearchPriority(row.kind);
+  const fields = [
+    row.id,
+    row.name,
+    row.qualified_name,
+    row.file_path ?? "",
+    pathBasename(row.file_path ?? ""),
+  ];
+
+  for (const term of terms) {
+    if (term.length === 0) {
+      continue;
+    }
+    const lowerTerm = term.toLowerCase();
+    const loweredFields = fields.map((field) => field.toLowerCase());
+    if (fields.some((field) => field === term)) {
+      score += 1000;
+    } else if (loweredFields.some((field) => field === lowerTerm)) {
+      score += 850;
+    } else if (fields.some((field) => field.startsWith(term))) {
+      score += 300;
+    } else if (loweredFields.some((field) => field.startsWith(lowerTerm))) {
+      score += 240;
+    } else if (fields.some((field) => field.includes(term))) {
+      score += 120;
+    } else if (loweredFields.some((field) => field.includes(lowerTerm))) {
+      score += 90;
+    }
+  }
+
+  return score;
+}
+
+function kindSearchPriority(kind: GraphNode["kind"]): number {
+  if (kind === "script_class" || kind === "scene") {
+    return 40;
+  }
+  if (kind === "autoload" || kind === "scene_node") {
+    return 35;
+  }
+  if (kind === "method" || kind === "signal") {
+    return 30;
+  }
+  if (kind === "property") {
+    return 25;
+  }
+  if (kind === "resource") {
+    return 20;
+  }
+  return 0;
+}
+
+function pathBasename(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))];
 }
 
 function searchRows(graph: GraphDatabase, query: string, limit: number): NodeRow[] {

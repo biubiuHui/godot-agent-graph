@@ -221,6 +221,47 @@ func helper() -> void:
     );
   });
 
+  it("extracts ordinary symbol read unresolved refs", () => {
+    const graph = extractGdscriptGraph(
+      parseGdscript(
+        `extends Node
+class_name SymbolReadUser
+
+const DEFAULT_LIMIT := 3
+
+func play(catalog: StepCatalog) -> void:
+\tif StepCatalog.FIXTURE_STEP_NAME == DEFAULT_LIMIT:
+\t\tcatalog.current_step = StepCatalog.FIXTURE_STEP_NAME
+`,
+        "res://scripts/symbol_read_user.gd",
+      ),
+      { updatedAt: 5700 },
+    );
+
+    expect(graph.unresolvedRefs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromNodeId: "method:res://scripts/symbol_read_user.gd:play",
+          referenceName: "FIXTURE_STEP_NAME",
+          referenceKind: "references_symbol",
+          candidates: [{ receiver: "StepCatalog" }],
+        }),
+        expect.objectContaining({
+          fromNodeId: "method:res://scripts/symbol_read_user.gd:play",
+          referenceName: "DEFAULT_LIMIT",
+          referenceKind: "references_symbol",
+          candidates: [],
+        }),
+        expect.objectContaining({
+          fromNodeId: "method:res://scripts/symbol_read_user.gd:play",
+          referenceName: "current_step",
+          referenceKind: "references_symbol",
+          candidates: [{ receiver: "catalog" }],
+        }),
+      ]),
+    );
+  });
+
   it("disambiguates duplicate member names in the same script file", () => {
     const graph = extractGdscriptGraph(
       parseGdscript(
