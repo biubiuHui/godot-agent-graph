@@ -176,6 +176,52 @@ describe("graph storage queries", () => {
     }
   });
 
+  it("finds resource nodes by metadata field names and string values", () => {
+    const graph = createGraphDatabase(createTempProjectRoot());
+
+    try {
+      const file: GraphFile = {
+        path: "res://resources/artifacts/artifact_001.tres",
+        kind: "resource",
+        contentHash: "artifact",
+        size: 42,
+        modifiedAt: 1000,
+        indexedAt: 2000,
+        nodeCount: 1,
+        parseErrors: [],
+      };
+      upsertFile(graph, file);
+
+      const resourceNode: GraphNode = {
+        id: "resource:res://resources/artifacts/artifact_001.tres",
+        kind: "resource",
+        name: "artifact_001.tres",
+        qualifiedName: "res://resources/artifacts/artifact_001.tres",
+        filePath: file.path,
+        startLine: 1,
+        endLine: null,
+        signature: "Resource",
+        metadata: {
+          properties: {
+            display_label: "Crystal Ember",
+            rules_text: "Cobalt lantern resonance",
+          },
+        },
+        updatedAt: 3000,
+      };
+      upsertNode(graph, resourceNode);
+
+      expect(searchNodes(graph, "cobalt lantern").map((node) => node.id)).toEqual([
+        resourceNode.id,
+      ]);
+      expect(searchNodes(graph, "display_label").map((node) => node.id)).toEqual([
+        resourceNode.id,
+      ]);
+    } finally {
+      graph.close();
+    }
+  });
+
   it("hides resolved refs by default while retaining them for resolver passes", () => {
     const graph = createGraphDatabase(createTempProjectRoot());
 

@@ -36,10 +36,10 @@ function createTempGraph(): GraphDatabase {
   return createGraphDatabase(root);
 }
 
-function addFile(graph: GraphDatabase, path: string): GraphFile {
+function addFile(graph: GraphDatabase, path: string, kind: GraphFile["kind"] = "gdscript"): GraphFile {
   const file: GraphFile = {
     path,
-    kind: "gdscript",
+    kind,
     contentHash: path,
     size: 1,
     modifiedAt: 1,
@@ -58,6 +58,7 @@ function addNode(
   name: string,
   qualifiedName: string,
   filePath: string,
+  metadata: GraphNode["metadata"] = {},
 ): GraphNode {
   const node: GraphNode = {
     id,
@@ -68,7 +69,7 @@ function addNode(
     startLine: 1,
     endLine: 1,
     signature: kind,
-    metadata: {},
+    metadata,
     updatedAt: 1,
   };
   upsertNode(graph, node);
@@ -184,6 +185,81 @@ describe("agent context queries", () => {
           "RecordBuilderPanel",
           "CurrentArchitecturePanel",
           "ComponentResourcePanel",
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("prioritizes resource directory and metadata matches over ui and test noise", () => {
+    const graph = createTempGraph();
+    try {
+      function insertResource(path: string, properties: Record<string, unknown>): void {
+        addFile(graph, path, "resource");
+        addNode(
+          graph,
+          `resource:${path}`,
+          "resource",
+          path.split("/").at(-1) ?? path,
+          path,
+          path,
+          {
+            properties,
+            type: "Resource",
+          },
+        );
+      }
+
+      function insertScriptClass(name: string, path: string): void {
+        addFile(graph, path);
+        addNode(graph, `script:${path}`, "script_class", name, name, path);
+      }
+
+      function insertProperty(name: string, owner: string, path: string): void {
+        addNode(graph, `property:${path}:${name}`, "property", name, `${owner}.${name}`, path);
+      }
+
+      insertResource("res://resources/artifacts/artifact_001.tres", {
+        display_label: "Crystal Ember",
+        rules_text: "Cobalt lantern resonance",
+      });
+      insertResource("res://resources/artifacts/artifact_002.tres", {
+        display_label: "River Quartz",
+        rules_text: "Amber signal trail",
+      });
+      insertResource("res://resources/artifacts/artifact_003.tres", {
+        display_label: "Demo Relic",
+        rules_text: "Granite lantern effect",
+      });
+
+      insertScriptClass("ArtifactResource", "res://scripts/resources/artifact_resource.gd");
+      insertProperty("display_label", "ArtifactResource", "res://scripts/resources/artifact_resource.gd");
+      insertProperty("rules_text", "ArtifactResource", "res://scripts/resources/artifact_resource.gd");
+      insertScriptClass("DemoArtifactEffectPanel", "res://ui/demo_artifact_effect_panel.gd");
+      insertScriptClass("ArtifactTopicFixture", "res://topics/artifact_topic_fixture.gd");
+      insertScriptClass("CrystalEmberCobaltLanternTest", "res://tests/crystal_ember_cobalt_lantern_test.gd");
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query:
+          "ArtifactResource display_label rules_text resources/artifacts Demo artifact effect label crystal ember cobalt lantern granite relic",
+        includeCode: false,
+        maxFiles: 6,
+      });
+
+      expect(context.files.slice(0, 3)).toEqual(
+        expect.arrayContaining([
+          "res://resources/artifacts/artifact_001.tres",
+          "res://resources/artifacts/artifact_002.tres",
+          "res://resources/artifacts/artifact_003.tres",
+        ]),
+      );
+      expect(context.files.slice(0, 6)).not.toEqual(
+        expect.arrayContaining([
+          "res://ui/demo_artifact_effect_panel.gd",
+          "res://topics/artifact_topic_fixture.gd",
+          "res://tests/crystal_ember_cobalt_lantern_test.gd",
         ]),
       );
     } finally {

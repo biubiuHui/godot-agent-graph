@@ -244,6 +244,12 @@ function contextSeedScore(node: GraphNode, query: string, exactTerms: Set<string
     }
   }
 
+  for (const fragment of queryPathFragments(query)) {
+    if (nodeFilePathForMatching(node).includes(fragment)) {
+      score += node.kind === "resource" ? 360 : 180;
+    }
+  }
+
   const queryTermWeights = weightedQueryTerms(query);
   const nodeTerms = nodeContextTerms(node);
   let matchedWeight = 0;
@@ -290,10 +296,60 @@ function nodeContextTerms(node: GraphNode): Set<string> {
       ...identifierTerms(node.qualifiedName),
       ...identifierTerms(node.filePath ?? ""),
       ...identifierTerms(node.id),
+      ...identifierTerms(metadataSearchText(node.metadata)),
     ]
       .map(normalizeContextTerm)
       .filter((term): term is string => term !== null),
   );
+}
+
+function queryPathFragments(query: string): string[] {
+  return uniqueStrings(
+    (query.match(/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+/g) ?? [])
+      .map(normalizePathFragment)
+      .filter((fragment) => fragment.length > 0),
+  );
+}
+
+function nodeFilePathForMatching(node: GraphNode): string {
+  return normalizePathFragment(node.filePath ?? "");
+}
+
+function normalizePathFragment(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/^res:\/\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+}
+
+function metadataSearchText(value: unknown): string {
+  const parts: string[] = [];
+  collectMetadataSearchText(value, parts);
+  return parts.join(" ");
+}
+
+function collectMetadataSearchText(value: unknown, parts: string[]): void {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    parts.push(String(value));
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectMetadataSearchText(item, parts);
+    }
+    return;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    parts.push(key);
+    collectMetadataSearchText(item, parts);
+  }
 }
 
 function identifierTerms(value: string): string[] {

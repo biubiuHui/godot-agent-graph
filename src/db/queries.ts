@@ -284,6 +284,7 @@ function searchRowScore(row: NodeRow, terms: string[]): number {
     row.qualified_name,
     row.file_path ?? "",
     pathBasename(row.file_path ?? ""),
+    row.metadata,
   ];
 
   for (const term of terms) {
@@ -364,6 +365,7 @@ function searchRows(graph: GraphDatabase, query: string, limit: number): NodeRow
           or name like @pattern escape '\\'
           or qualified_name like @pattern escape '\\'
           or file_path like @pattern escape '\\'
+          or metadata like @pattern escape '\\'
         order by
           case
             when name = @query then 0
