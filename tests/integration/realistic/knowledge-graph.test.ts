@@ -5,14 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  exploreGodotContext,
-  getCallersContext,
-} from "../../../src/context/explore.js";
+import { exploreGodotContext } from "../../../src/context/explore.js";
 import { createGraphDatabase } from "../../../src/db/index.js";
 import { getNode, listEdges, searchNodes } from "../../../src/db/queries.js";
-import { getImpactContext } from "../../../src/graph/impact.js";
-import { getSceneDetails } from "../../../src/graph/queries.js";
 import { indexGodotProject } from "../../../src/indexer/indexer.js";
 
 const fixturesRoot = fileURLToPath(new URL("../../fixtures/godot", import.meta.url));
@@ -177,7 +172,7 @@ describe("realistic Godot knowledge graph", () => {
     }
   });
 
-  it("returns correct query, scene, context, and impact views", () => {
+  it("returns correct query, scene, and context views", () => {
     const root = indexedRealisticFixture();
     const graph = createGraphDatabase(root);
     try {
@@ -185,7 +180,7 @@ describe("realistic Godot knowledge graph", () => {
         "script:res://scripts/actors/fixture_actor.gd",
       );
 
-      expect(getSceneDetails(graph, "res://scenes/fixture_main.tscn").nodes.map((node) => node.id)).toEqual(
+      expect(sceneNodeIds(graph, "res://scenes/fixture_main.tscn")).toEqual(
         expect.arrayContaining([
           "scene_node:res://scenes/fixture_main.tscn:Main",
           "scene_node:res://scenes/fixture_main.tscn:FixtureActor",
@@ -214,31 +209,27 @@ describe("realistic Godot knowledge graph", () => {
         ]),
       );
 
-      const callers = getCallersContext(graph, {
-        projectRoot: root,
-        symbol: "advance_night",
-        includeCode: false,
+      const callEdges = listEdges(graph, {
+        target: "method:res://scripts/autoload/fixture_state.gd:advance_night",
+        kind: "calls",
       });
-      expect(callers.relationships).toEqual(
+      expect(callEdges).toEqual(
         expect.arrayContaining([
-          expect.stringContaining(
-            "method:res://scripts/controllers/main_controller.gd:_ready calls method:res://scripts/autoload/fixture_state.gd:advance_night",
-          ),
+          expect.objectContaining({
+            source: "method:res://scripts/controllers/main_controller.gd:_ready",
+          }),
         ]),
       );
 
-      const impact = getImpactContext(graph, "res://scripts/actors/fixture_actor.gd");
-      expect(impact.affectedScenes.map((node) => node.id)).toEqual(
-        expect.arrayContaining([
-          "scene:res://scenes/fixture_actor.tscn",
-          "scene:res://scenes/fixture_main.tscn",
-        ]),
-      );
-      expect(impact.recommendedCheckFiles).toEqual(
+      const editContext = exploreGodotContext(graph, {
+        projectRoot: root,
+        query: "change FixtureActor",
+        includeCode: false,
+      });
+      expect(editContext.blastRadius?.checkFiles).toEqual(
         expect.arrayContaining([
           "res://scripts/actors/fixture_actor.gd",
           "res://scenes/fixture_actor.tscn",
-          "res://scenes/fixture_main.tscn",
         ]),
       );
     } finally {
@@ -246,3 +237,13 @@ describe("realistic Godot knowledge graph", () => {
     }
   });
 });
+
+function sceneNodeIds(graph: ReturnType<typeof createGraphDatabase>, scenePath: string): string[] {
+  return listEdges(graph, {
+    source: `scene:${scenePath}`,
+    kind: "contains",
+  })
+    .map((edge) => getNode(graph, edge.target))
+    .filter((node) => node?.kind === "scene_node")
+    .map((node) => node.id);
+}

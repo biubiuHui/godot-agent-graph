@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "copy-assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/db',{recursive:true});fs.copyFileSync('src/db/schema.sql','dist/db/schema.sql');fs.chmodSync('dist/bin/gdgraph.js',0o755)\"",
+    "copy-assets": "node scripts/copy-assets.mjs",
     "build": "npm run clean && tsc -p tsconfig.json && npm run copy-assets",
     "gdgraph": "tsx src/bin/gdgraph.ts",
     "privacy:check": "tsx scripts/privacy-check.ts",

@@ -12,53 +12,31 @@ gdgraph version
 
 Prints the package version.
 
-## init
-
-```bash
-gdgraph init [path]
-```
-
-Creates `.gdgraph/graph.db` and runs a full index for the Godot project at `path` or the current directory.
-
-## index
-
-```bash
-gdgraph index [path]
-```
-
-Rebuilds the graph from disk. Use this for first-time indexing or recovery.
-
-## rebuild
-
-```bash
-gdgraph rebuild [path]
-```
-
-Explicit alias for `gdgraph index [path]`. It clears old graph records and rebuilds the index from the current project files.
-
-## clean
-
-```bash
-gdgraph clean [path]
-```
-
-Removes the project's `.gdgraph` storage directory without rebuilding. After cleaning, `gdgraph status [path]` reports the project as uninitialized until `gdgraph init`, `gdgraph index`, or `gdgraph rebuild` is run again.
-
-## uninit
-
-```bash
-gdgraph uninit [path]
-```
-
-Alias for `gdgraph clean [path]`. It removes the project's `.gdgraph` storage directory without rebuilding.
-
 ## sync
 
 ```bash
 gdgraph sync [path]
+gdgraph sync [path] --rebuild
 ```
 
-Detects added, modified, and deleted Godot files, then refreshes the graph. The result includes `added`, `modified`, `deleted`, corresponding counts, and `changeScope: "graph_index"`. These arrays describe graph index changes, not Git status.
+Creates or updates `.gdgraph/graph.db` for the Godot project at `path` or the current directory.
+
+Sync is incremental after the first index: it parses added and modified Godot files, removes graph records for deleted files, and recomputes resolver-owned relationships from stored reference candidates. Unchanged indexed files are not rewritten by ordinary sync.
+
+Use `--rebuild` to remove the existing `.gdgraph` directory before syncing. This performs a fresh full index through the same sync pipeline and returns `rebuilt: true` when the rebuild succeeds. In rebuild output, change counts describe files inserted into the new graph index, not Git status.
+
+The result includes `addedCount`, `modifiedCount`, `deletedCount`, `changeListsOmitted: true`, and `changeScope: "graph_index"`. Full path lists are omitted to keep CLI and agent output compact.
+
+`parseErrors` are gdgraph parser/extractor errors only. Sync output includes:
+
+```json
+{
+  "parseErrorScope": "gdgraph_static_parse",
+  "compilerChecked": false
+}
+```
+
+Godot compiler/editor import validation still requires running Godot or project tests separately.
 
 ## status
 
@@ -66,72 +44,61 @@ Detects added, modified, and deleted Godot files, then refreshes the graph. The 
 gdgraph status [path]
 ```
 
-Shows graph database path, file/node/edge counts, project metadata, and freshness metadata.
+Shows initialization state, graph database path, file/node/edge counts, project metadata, and freshness metadata.
 
-## files
+If `initialized:false` or `indexEmpty:true`, run `gdgraph sync [path]` before graph queries.
 
-```bash
-gdgraph files [path]
-```
-
-Lists indexed Godot files with hashes, sizes, parse errors, and node counts.
-
-## search
+## context
 
 ```bash
-gdgraph search <query> --path <path>
+gdgraph context <query> --path <path>
+gdgraph context <query> --path <path> --code
+gdgraph context <query> --path <path> --max-files 10
 ```
 
-Searches graph nodes by symbol, scene, script, signal, resource, autoload, or input action text.
+Returns a compact graph navigation package for scripts, scenes, resources, signals, autoloads, node paths, call chains, flow, and edit planning.
 
-## scene
+This is the CLI equivalent of `godot_context`. It is a bounded navigation result, not an exhaustive proof chain.
+
+Write `<query>` as a short keyword and identifier string. Prefer exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
+
+Good:
 
 ```bash
-gdgraph scene <scene-path> --path <path>
+gdgraph context "enemy_spawner spawn_wave WaveConfig export EnemyDefinition spawn_weight scene_path" --path <path>
 ```
 
-Returns indexed scene details and contained scene nodes for a `.tscn` resource path.
+Avoid natural-language task wording such as `find`, `include paths`, `summarize`, `relevant for`, or `tell me`.
 
-## symbol
+## node
 
 ```bash
-gdgraph symbol <name> --path <path>
+gdgraph node --path <path> --file res://scripts/fixture_actor.gd
+gdgraph node --path <path> --symbol FixtureActor
+gdgraph node --path <path> --symbol shared_name --file res://scripts/example.gd
+gdgraph node --path <path> --id script:res://scripts/fixture_actor.gd
+gdgraph node --path <path> --file res://scripts/fixture_actor.gd --offset 1 --limit 80
+gdgraph node --path <path> --symbol FixtureActor --no-code
+gdgraph node --path <path> --id script:res://scripts/fixture_actor.gd --symbols-only
 ```
 
-Finds indexed symbols matching the name.
+Reads exact indexed source or metadata for one file, symbol, or graph node id.
 
-## explore
+Selector rules:
+
+- `--id` is exclusive.
+- `--symbol` may be combined with `--file` to disambiguate same-name symbols.
+- `--file` alone reads the indexed file.
+
+## clean
 
 ```bash
-gdgraph explore <query> --path <path>
-gdgraph explore <query> --path <path> --no-code
+gdgraph clean [path]
 ```
 
-Returns Agent-ready context for a feature, symbol, scene, or resource query. Includes related nodes, relationship explanations, and bounded source snippets unless `--no-code` is used.
+Removes the project's `.gdgraph` storage directory without rebuilding. After cleaning, `gdgraph status [path]` reports the project as uninitialized until `gdgraph sync [path]` is run.
 
-## callers
-
-```bash
-gdgraph callers <symbol> --path <path>
-```
-
-Returns incoming call context and related graph relationships for a symbol.
-
-## callees
-
-```bash
-gdgraph callees <symbol> --path <path>
-```
-
-Returns outgoing call context and related graph relationships for a symbol.
-
-## impact
-
-```bash
-gdgraph impact <symbol-or-file> --path <path>
-```
-
-Returns likely affected scenes, scripts, resources, relationship paths, and recommended files to check before editing.
+`clean` only removes local graph data. It does not remove MCP or Agent configuration; use `gdgraph uninstall` for that.
 
 ## serve
 
@@ -139,7 +106,7 @@ Returns likely affected scenes, scripts, resources, relationship paths, and reco
 gdgraph serve --mcp [path]
 ```
 
-Starts the MCP stdio server. Startup performs a catch-up sync and, when possible, attaches a watcher that tracks pending files.
+Starts the MCP stdio server. Startup performs a catch-up sync and, when possible, attaches a watcher that tracks pending files and debounces the same incremental sync path.
 
 ## install
 
@@ -152,9 +119,12 @@ gdgraph install [path] --target opencode
 gdgraph install [path] --target gemini
 gdgraph install [path] --target kiro
 gdgraph install [path] --command /absolute/path/to/gdgraph
+gdgraph install [path] --target codex --with-skill
 ```
 
 Writes gdgraph MCP configuration for supported Agent clients. Supported targets are `all`, `codex`, `claude`, `cursor`, `opencode`, `gemini`, and `kiro`.
+
+`--with-skill` is only used by the Codex target. It additionally installs the optional global Codex skill directory at `~/.codex/skills/godot-graph-navigation/`, or under the `--home` directory when `--home` is provided.
 
 ## uninstall
 
@@ -166,6 +136,17 @@ gdgraph uninstall [path] --target cursor
 gdgraph uninstall [path] --target opencode
 gdgraph uninstall [path] --target gemini
 gdgraph uninstall [path] --target kiro
+gdgraph uninstall [path] --target codex --with-skill
 ```
 
 Removes only gdgraph-owned or exact generated MCP configuration.
+
+With the Codex target, `--with-skill` also removes the generated global Codex skill when it still exactly matches the bundled skill. User-modified skill files are preserved.
+
+To stop using gdgraph for a project completely:
+
+```bash
+gdgraph uninstall /path/to/project --target codex --with-skill
+gdgraph clean /path/to/project
+npm uninstall -g godot-agent-graph
+```

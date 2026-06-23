@@ -1,0 +1,4 @@
+interface:
+  display_name: "Godot Graph Navigation"
+  short_description: "Navigate Godot code with gdgraph indexes"
+  default_prompt: "Use $godot-graph-navigation to inspect this Godot project with gdgraph before broad source searches."

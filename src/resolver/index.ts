@@ -1,7 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { deleteUnresolvedRefs, insertEdge, listEdges, listNodes, listUnresolvedRefs } from "../db/queries.js";
+import {
+  insertEdge,
+  listEdges,
+  listNodes,
+  listUnresolvedRefs,
+  markUnresolvedRefsResolved,
+  resetUnresolvedRefResolution,
+} from "../db/queries.js";
 import type { GraphDatabase } from "../db/index.js";
 import type { EdgeKind, GraphEdge, GraphNode, UnresolvedRef } from "../types.js";
 import { buildGodotPathIndexes, resourcePathFromNodeId } from "./godot-paths.js";
@@ -15,7 +22,8 @@ export interface ResolveGraphResult {
 export function resolveGraph(graph: GraphDatabase): ResolveGraphResult {
   const nodes = listNodes(graph);
   const edges = listEdges(graph);
-  const unresolvedRefs = listUnresolvedRefs(graph);
+  resetUnresolvedRefResolution(graph);
+  const unresolvedRefs = listUnresolvedRefs(graph, { includeResolved: true });
   const indexes = buildGodotPathIndexes(nodes);
   const edgeKeys = new Set(edges.map(edgeKey));
   const sourceCache = new Map<string, string[] | null>();
@@ -54,7 +62,7 @@ export function resolveGraph(graph: GraphDatabase): ResolveGraphResult {
       resolvedRefIds.push(ref.id);
     }
   });
-  deleteUnresolvedRefs(graph, resolvedRefIds);
+  markUnresolvedRefsResolved(graph, resolvedRefIds);
 
   return { resolvedEdgeCount };
 }

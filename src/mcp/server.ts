@@ -9,6 +9,9 @@ import { callGodotMcpTool, listGodotMcpTools } from "./tools.js";
 import { syncGodotProject, type SyncGodotProjectResult } from "../sync/index.js";
 import { globalPendingFileTracker, watchGodotProject } from "../sync/watcher.js";
 
+const CONTEXT_QUERY_DESCRIPTION =
+  "Terse identifier-heavy keyword query. Prefer exact classes, methods, constants, fields, resource paths, file/path fragments, and domain nouns. Do not write natural-language task instructions like find, include paths, summarize, relevant for, or tell me.";
+
 export interface CreateGodotMcpServerOptions {
   projectRoot?: string;
 }
@@ -49,6 +52,7 @@ export function createGodotMcpServer(
       {
         description: tool.description,
         inputSchema: inputSchemaForTool(tool.name),
+        annotations: tool.annotations,
       },
       async (args) =>
         callGodotMcpTool(tool.name, {
@@ -70,8 +74,7 @@ export async function serveGodotMcp(options: ServeGodotMcpOptions = {}): Promise
   if (syncResult.ok) {
     globalPendingFileTracker.clearPending(projectRoot);
   } else {
-    logMcpError("startup_sync_failed", new Error(syncResult.message), {
-      projectRoot,
+    logMcpError("startup_sync_failed", new Error("Startup sync failed."), {
       reason: syncResult.reason,
     });
   }
@@ -106,56 +109,23 @@ export function createWatcherSyncHandler(
         return;
       }
 
-      logMcpError("watcher_sync_failed", new Error(result.message), {
-        projectRoot: options.projectRoot,
+      logMcpError("watcher_sync_failed", new Error("Watcher sync failed."), {
         reason: result.reason,
       }, options.logError);
     } catch (error) {
       logMcpError("watcher_sync_failed", error, {
-        projectRoot: options.projectRoot,
       }, options.logError);
     }
   };
 }
 
 export function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAny> {
-  if (toolName === "godot_search") {
+  if (toolName === "godot_context") {
     return {
       projectPath: z.string().optional(),
-      query: z.string(),
-      limit: z.number().optional(),
-    };
-  }
-
-  if (toolName === "godot_scene") {
-    return {
-      projectPath: z.string().optional(),
-      scenePath: z.string(),
-    };
-  }
-
-  if (toolName === "godot_context" || toolName === "godot_explore") {
-    return {
-      projectPath: z.string().optional(),
-      query: z.string(),
-      maxFiles: z.number().optional(),
-      includeCode: z.boolean().optional(),
-    };
-  }
-
-  if (toolName === "godot_symbol" || toolName === "godot_callers" || toolName === "godot_callees") {
-    return {
-      projectPath: z.string().optional(),
-      symbol: z.string(),
-      maxFiles: z.number().optional(),
-      includeCode: z.boolean().optional(),
-    };
-  }
-
-  if (toolName === "godot_impact") {
-    return {
-      projectPath: z.string().optional(),
-      target: z.string(),
+      query: z.string().describe(CONTEXT_QUERY_DESCRIPTION),
+      maxFiles: z.number().describe("Maximum number of top context files to emphasize.").optional(),
+      includeCode: z.boolean().describe("Include bounded snippets in the context package.").optional(),
     };
   }
 

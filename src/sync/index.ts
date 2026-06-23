@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 
 import { createGraphDatabase } from "../db/index.js";
 import { upsertProjectMetadata } from "../db/queries.js";
-import { listIndexedFiles } from "../graph/queries.js";
-import { indexGodotProject } from "../indexer/indexer.js";
+import { getProjectOverview, listIndexedFiles } from "../graph/queries.js";
+import { indexGodotProjectIncremental } from "../indexer/indexer.js";
 import { scanGodotProject, type GodotProjectScanOk } from "../indexer/scan.js";
 import { GraphLockError, withGraphLock } from "./lock.js";
 
@@ -20,6 +20,8 @@ export interface SyncGodotProjectOk {
   edgeCount: number;
   unresolvedRefCount: number;
   parseErrors: string[];
+  parseErrorScope: "gdgraph_static_parse";
+  compilerChecked: false;
   lastSyncAt: number;
   changeScope: "graph_index";
   message: string;
@@ -30,6 +32,8 @@ export interface SyncGodotProjectError {
   projectRoot: string;
   reason: string;
   message: string;
+  retryAfterMs?: number;
+  lockKind?: "graph_write";
 }
 
 export type SyncGodotProjectResult = SyncGodotProjectOk | SyncGodotProjectError;
@@ -39,12 +43,25 @@ interface CurrentFileHash {
   contentHash: string;
 }
 
+interface SyncIndexSummary {
+  ok: true;
+  projectRoot: string;
+  databasePath: string;
+  fileCount: number;
+  nodeCount: number;
+  edgeCount: number;
+  unresolvedRefCount: number;
+  parseErrors: string[];
+}
+
 export interface SyncGodotProjectOptions {
   lockRetryMs?: number;
   lockRetryIntervalMs?: number;
 }
 
-const GRAPH_INDEX_DELTA_MESSAGE = "added, modified, and deleted describe graph index changes, not Git status.";
+const GRAPH_INDEX_DELTA_MESSAGE =
+  "Synchronized graph index. Delta fields describe graph index changes, not Git status.";
+const GRAPH_LOCK_RETRY_AFTER_MS = 1_000;
 
 export function syncGodotProject(
   projectRoot: string,
@@ -71,6 +88,8 @@ export function syncGodotProject(
         ok: false,
         projectRoot: scan.root,
         reason: "locked",
+        retryAfterMs: GRAPH_LOCK_RETRY_AFTER_MS,
+        lockKind: "graph_write",
         message: error.message,
       };
     }
@@ -118,7 +137,13 @@ function syncScannedGodotProject(scan: GodotProjectScanOk): SyncGodotProjectResu
     }
   }
 
-  const indexed = indexGodotProject(scan.root);
+  const indexed = hasGraphChanges(added, modified, deleted)
+    ? indexGodotProjectIncremental(scan.root, {
+        changedAbsolutePaths: changedAbsolutePaths(scan, [...added, ...modified]),
+        deletedPaths: deleted,
+        currentResPaths: scan.files.map((file) => file.resPath),
+      })
+    : currentIndexSummary(scan.root);
   if (!indexed.ok) {
     return {
       ok: false,
@@ -157,10 +182,44 @@ function syncScannedGodotProject(scan: GodotProjectScanOk): SyncGodotProjectResu
     edgeCount: indexed.edgeCount,
     unresolvedRefCount: indexed.unresolvedRefCount,
     parseErrors: indexed.parseErrors,
+    parseErrorScope: "gdgraph_static_parse",
+    compilerChecked: false,
     lastSyncAt,
     changeScope: "graph_index",
     message: GRAPH_INDEX_DELTA_MESSAGE,
   };
+}
+
+function hasGraphChanges(added: string[], modified: string[], deleted: string[]): boolean {
+  return added.length > 0 || modified.length > 0 || deleted.length > 0;
+}
+
+function changedAbsolutePaths(scan: GodotProjectScanOk, paths: string[]): string[] {
+  const changed = new Set(paths);
+  return scan.files
+    .filter((file) => changed.has(file.resPath))
+    .map((file) => file.absolutePath);
+}
+
+function currentIndexSummary(projectRoot: string): SyncIndexSummary {
+  const graph = createGraphDatabase(projectRoot);
+  try {
+    const overview = getProjectOverview(graph);
+    return {
+      ok: true,
+      projectRoot,
+      databasePath: graph.databasePath,
+      fileCount: overview.fileCount,
+      nodeCount: overview.nodeCount,
+      edgeCount: overview.edgeCount,
+      unresolvedRefCount: overview.unresolvedRefCount,
+      parseErrors: listIndexedFiles(graph).flatMap((file) =>
+        file.parseErrors.map((error) => `${file.path}: ${error}`),
+      ),
+    };
+  } finally {
+    graph.close();
+  }
 }
 
 function hashFile(absolutePath: string): string {

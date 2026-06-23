@@ -83,6 +83,7 @@ export interface UnresolvedRef {
   filePath: string;
   line: number | null;
   column: number | null;
+  resolved?: boolean;
   candidates: JsonObject[];
 }
 

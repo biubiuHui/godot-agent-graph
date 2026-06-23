@@ -14,12 +14,11 @@ import {
   uniqueStrings,
   visibleEdges,
 } from "../graph/traversal.js";
-import type { GraphNode } from "../types.js";
+import type { GraphNode, UnresolvedRef } from "../types.js";
 
 export interface ContextQueryOptions {
   projectRoot: string;
   query?: string;
-  symbol?: string;
   maxFiles?: number;
   includeCode?: boolean;
 }
@@ -53,6 +52,23 @@ export interface AgentNodeSummary {
 
 const MAX_CONTEXT_NODES = 60;
 const MAX_CONTEXT_RELATIONSHIPS = 80;
+const WEAK_CONTEXT_TERMS = new Set([
+  "base",
+  "builder",
+  "current",
+  "record",
+  "run",
+]);
+const IGNORED_CONTEXT_TERMS = new Set([
+  "and",
+  "for",
+  "from",
+  "into",
+  "that",
+  "the",
+  "this",
+  "with",
+]);
 
 export function exploreGodotContext(
   graph: GraphDatabase,
@@ -60,84 +76,6 @@ export function exploreGodotContext(
 ): AgentContext {
   const seeds = selectContextSeeds(graph, options.query);
   return contextFromSeeds(graph, options.projectRoot, options.query, seeds, options);
-}
-
-export function getSymbolContext(
-  graph: GraphDatabase,
-  options: ContextQueryOptions & { symbol: string },
-): AgentContext {
-  const seeds = searchNodes(graph, options.symbol, 10);
-  return contextFromSeeds(graph, options.projectRoot, options.symbol, seeds, options);
-}
-
-export function getCallersContext(
-  graph: GraphDatabase,
-  options: ContextQueryOptions & { symbol: string },
-): AgentContext {
-  const snapshot = loadGraphSnapshot(graph);
-  const targets = searchNodes(graph, options.symbol, 10);
-  const relationships: string[] = [];
-  const related: GraphNode[] = [...targets];
-
-  for (const target of targets) {
-    for (const edge of incomingEdges(snapshot, target.id)) {
-      relationships.push(explainEdge(edge));
-      const source = snapshot.nodes.find((node) => node.id === edge.source);
-      if (source) {
-        related.push(source);
-      }
-    }
-    for (const ref of refsMatching(snapshot, target.name)) {
-      const source = snapshot.nodes.find((node) => node.id === ref.fromNodeId);
-      relationships.push(explainUnresolvedRef(ref));
-      if (source) {
-        related.push(source);
-      }
-    }
-  }
-
-  return finalizeContext(
-    options.projectRoot,
-    options.symbol,
-    related,
-    relationships,
-    new Set(targets.map((target) => target.id)),
-    [],
-    options,
-  );
-}
-
-export function getCalleesContext(
-  graph: GraphDatabase,
-  options: ContextQueryOptions & { symbol: string },
-): AgentContext {
-  const snapshot = loadGraphSnapshot(graph);
-  const seeds = searchNodes(graph, options.symbol, 5);
-  const related: GraphNode[] = [...seeds];
-  const relationships: string[] = [];
-
-  for (const seed of seeds) {
-    for (const edge of outgoingEdges(snapshot, seed.id)) {
-      relationships.push(explainEdge(edge));
-      const target = snapshot.nodes.find((node) => node.id === edge.target);
-      if (target) {
-        related.push(target);
-      }
-    }
-    for (const ref of refsFrom(snapshot, seed.id)) {
-      relationships.push(explainUnresolvedRef(ref));
-    }
-  }
-
-  return finalizeContext(
-    options.projectRoot,
-    options.symbol,
-    related,
-    relationships,
-    new Set(seeds.map((seed) => seed.id)),
-    [],
-    options,
-  );
 }
 
 function contextFromSeeds(
@@ -165,9 +103,44 @@ function contextFromSeeds(
     for (const ref of refsFrom(snapshot, seed.id)) {
       relationships.push(explainUnresolvedRef(ref));
     }
+    for (const ref of reverseUnresolvedRefsForSeed(snapshot, seed)) {
+      relationships.push(explainUnresolvedRef(ref));
+      const source = snapshot.nodes.find((node) => node.id === ref.fromNodeId);
+      if (source) {
+        related.push(source);
+      }
+    }
   }
 
   return finalizeContext(projectRoot, query, related, relationships, entryPointIds, pathsBetween, options);
+}
+
+function reverseUnresolvedRefsForSeed(
+  snapshot: ReturnType<typeof loadGraphSnapshot>,
+  seed: GraphNode,
+): UnresolvedRef[] {
+  const names = uniqueStrings([seed.name, seed.qualifiedName].filter((name) => name.length > 0));
+  return uniqueUnresolvedRefs(names.flatMap((name) => refsMatching(snapshot, name)))
+    .filter((ref) => ref.fromNodeId !== seed.id);
+}
+
+function uniqueUnresolvedRefs(refs: UnresolvedRef[]): UnresolvedRef[] {
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = [
+      ref.fromNodeId,
+      ref.referenceKind,
+      ref.referenceName,
+      ref.filePath,
+      ref.line ?? "",
+      ref.column ?? "",
+    ].join("\0");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function finalizeContext(
@@ -271,11 +244,83 @@ function contextSeedScore(node: GraphNode, query: string, exactTerms: Set<string
     }
   }
 
-  if (node.name && query.includes(node.name)) {
+  const queryTermWeights = weightedQueryTerms(query);
+  const nodeTerms = nodeContextTerms(node);
+  let matchedWeight = 0;
+  let matchedCount = 0;
+  for (const [term, weight] of queryTermWeights) {
+    if (nodeTerms.has(term)) {
+      matchedWeight += weight;
+      matchedCount += 1;
+    }
+  }
+
+  score += matchedWeight * 28;
+  score += matchedCount * matchedCount * 8;
+
+  if (matchedCount <= 2 && isLikelyUiSurface(node)) {
+    score -= 30;
+  }
+
+  if (node.name && query.toLowerCase().includes(node.name.toLowerCase())) {
     score += 40;
   }
 
   return score + kindPriority(node.kind);
+}
+
+function weightedQueryTerms(query: string): Map<string, number> {
+  const weights = new Map<string, number>();
+  for (const rawTerm of identifierTerms(query)) {
+    const term = normalizeContextTerm(rawTerm);
+    if (!term || IGNORED_CONTEXT_TERMS.has(term)) {
+      continue;
+    }
+
+    const weight = WEAK_CONTEXT_TERMS.has(term) ? 1 : 2;
+    weights.set(term, Math.max(weights.get(term) ?? 0, weight));
+  }
+  return weights;
+}
+
+function nodeContextTerms(node: GraphNode): Set<string> {
+  return new Set(
+    [
+      ...identifierTerms(node.name),
+      ...identifierTerms(node.qualifiedName),
+      ...identifierTerms(node.filePath ?? ""),
+      ...identifierTerms(node.id),
+    ]
+      .map(normalizeContextTerm)
+      .filter((term): term is string => term !== null),
+  );
+}
+
+function identifierTerms(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((term) => term.length >= 3);
+}
+
+function normalizeContextTerm(value: string): string | null {
+  const term = value.toLowerCase();
+  if (term.length < 3) {
+    return null;
+  }
+  if (term.endsWith("ies") && term.length > 4) {
+    return `${term.slice(0, -3)}y`;
+  }
+  if (term.endsWith("s") && term.length > 4) {
+    return term.slice(0, -1);
+  }
+  return term;
+}
+
+function isLikelyUiSurface(node: GraphNode): boolean {
+  return /\b(adapter|component|panel|snapshot|ui)\b/i.test(
+    identifierTerms([node.name, node.qualifiedName, node.filePath ?? ""].join(" ")).join(" "),
+  );
 }
 
 function kindPriority(kind: string): number {

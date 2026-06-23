@@ -33,6 +33,7 @@ gdgraph install --target cursor
 gdgraph install --target opencode
 gdgraph install --target gemini
 gdgraph install --target kiro
+gdgraph install --target codex --with-skill
 ```
 
 The generated server command is usually:
@@ -86,13 +87,48 @@ For Codex, install also manages a short project `AGENTS.md` block:
 ## Godot Graph Navigation
 
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool `godot_context` before broad file search.
+- For `godot_context.query`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
+- Do not write natural-language task instructions in `godot_context.query`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
 - Use `godot_node` for indexed Godot source reads instead of raw file reads.
-- If the graph is stale or missing, use `godot_status` then `godot_sync`; without MCP, run `gdgraph sync <project>` or `gdgraph explore <query> --path <project>`.
-- Before edits, refactors, reviews, or debugging changes, use `godot_context` for edit-planning and blast-radius context; use `godot_impact` only when a dedicated compatibility impact report is needed.
+- If the graph is stale or missing, use `godot_status` then `godot_sync`; without MCP, run `gdgraph sync <project>`, then `gdgraph context <query> --path <project>`.
+- Before edits, refactors, reviews, or debugging changes, use `godot_context` for edit-planning and bounded relationship context.
+- Treat `godot_context.truncated` and `godot_node.notes.omitted` as signs that the graph returned a bounded navigation summary, not exhaustive proof; use a narrow `rg` or tests for constants, enums, signal names, resource paths, and string protocols.
 <!-- godot-agent-graph:end codex-instructions -->
 ```
 
 The installer replaces or removes only this marked instruction block.
+
+By default, Codex install does not copy the repository skill. To install the optional global Codex skill as well, run:
+
+```bash
+gdgraph install /path/to/project --target codex --with-skill
+```
+
+This writes:
+
+```text
+~/.codex/skills/godot-graph-navigation/
+```
+
+When `--home` is provided, the skill is written under that home directory's `.codex/skills` folder. If that skill path already exists and differs from the bundled gdgraph skill, install preserves the existing directory instead of overwriting it.
+
+Use the matching uninstall flag to remove it:
+
+```bash
+gdgraph uninstall /path/to/project --target codex --with-skill
+```
+
+Uninstall removes the global skill only when it still exactly matches the bundled generated skill. User-modified skill files are preserved.
+
+To stop using gdgraph for a project completely, remove Agent configuration, remove local graph data, then uninstall the global package:
+
+```bash
+gdgraph uninstall /path/to/project --target codex --with-skill
+gdgraph clean /path/to/project
+npm uninstall -g godot-agent-graph
+```
+
+`uninstall` removes gdgraph-owned Agent configuration. `clean` removes the project-local `.gdgraph` index data.
 
 ## Claude Code
 

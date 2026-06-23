@@ -14,7 +14,7 @@ Symptom:
 Run:
 
 ```bash
-gdgraph init /path/to/godot/project
+gdgraph sync /path/to/godot/project
 ```
 
 If the path is not a Godot project, make sure it contains `project.godot`.
@@ -49,15 +49,31 @@ godot_sync
 
 If you are about to edit or rely on a pending file, read that file directly or sync first.
 
-## Sync change arrays look like Git status
+## Sync change counts look like Git status
 
-`gdgraph sync` and `godot_sync` report graph index deltas:
+`gdgraph sync` and `godot_sync` report graph index delta counts:
 
-- `added`
-- `modified`
-- `deleted`
+- `addedCount`
+- `modifiedCount`
+- `deletedCount`
 
-These fields describe which Godot files changed in the graph index since the previous index, not Git working tree status. Check `changeScope`; it should be `graph_index`.
+These fields describe how many Godot files changed in the graph index since the previous index, not Git working tree status. Check `changeScope`; it should be `graph_index`. Path lists are omitted by default and `changeListsOmitted` is `true`.
+
+For `gdgraph sync --rebuild`, the old graph database is removed first. The counts then describe files inserted into the new graph index from scratch.
+
+After the first index, sync is incremental. It parses added and modified Godot files, removes graph records for deleted files, and recomputes resolver-owned relationships. Unchanged indexed files are not rewritten by ordinary sync.
+
+## Force a full graph rebuild
+
+Use the single sync flow with `--rebuild`:
+
+```bash
+gdgraph sync /path/to/godot/project --rebuild
+```
+
+This removes the existing `.gdgraph` directory and then builds a fresh index. There is no separate `gdgraph rebuild`, `gdgraph build`, `gdgraph init`, or `gdgraph index` command.
+
+Use `gdgraph clean /path/to/godot/project` only when you want to delete `.gdgraph` without rebuilding it.
 
 ## Graph database is temporarily locked
 
@@ -73,23 +89,28 @@ From MCP, call `godot_sync` again. If the error persists, check for a long-runni
 
 ## Watcher is disabled or degraded
 
-`watcher: "disabled"` means the current command is not running an active watcher, or the tool result came from a one-shot CLI command. Use `gdgraph sync` manually.
+`watcher: "disabled"` means the current command is not running an active watcher, or the tool result came from a one-shot CLI command. This is normal for manual CLI/MCP calls; use `gdgraph sync` manually when freshness says work is pending.
 
 `watcher: "degraded"` means filesystem watching reported an error. Use manual sync while investigating platform file-watch limits or project permissions.
 
-## Parse errors appear in file records
+## Parse errors appear in sync output
 
-Single-file parse errors are recorded on the file and do not stop the whole index. Inspect file output:
+`parseErrors` are gdgraph parser/extractor errors only. They do not mean Godot compiler or editor import validation passed. Sync output makes this explicit:
 
-```bash
-gdgraph files /path/to/godot/project
+```json
+{
+  "parseErrorScope": "gdgraph_static_parse",
+  "compilerChecked": false
+}
 ```
 
-Then fix the listed Godot file and run:
+Single-file parse errors do not stop the whole index. Fix the listed Godot file and run:
 
 ```bash
 gdgraph sync /path/to/godot/project
 ```
+
+Run Godot or project tests separately when you need compiler/import validation.
 
 ## Scene still references a deleted script
 

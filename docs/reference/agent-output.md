@@ -29,8 +29,8 @@ The agent-facing output is implemented in these modules:
 | --- | --- |
 | `src/context/agent-output.ts` | Formats graph context into compact node, path, relationship, snippet, budget, and omitted-count fields. |
 | `src/context/explore.ts` | Builds ranked `godot_context` input from search, graph neighbors, source snippets, path links, and optional blast-radius data. |
-| `src/mcp/tools.ts` | Defines the default MCP surface and adapts context, node, sync, search, scene, and impact payloads to compact JSON. |
-| `src/graph/impact.ts` | Produces focused direct impact context and check-file recommendations. |
+| `src/context/node-payload.ts` | Builds exact `godot_node` reads for files, symbols, and graph node ids. |
+| `src/mcp/tools.ts` | Defines the MCP surface and adapts status, context, node, and sync payloads to compact JSON. |
 | `src/db/queries.ts` | Provides graph node/file lookup, search token handling, relationship rows, and symbol-reference data. |
 
 Public fixtures and temporary synthetic projects are used for tests. Documentation and tests must not copy private project code, private project names, absolute local paths, or private Godot assets.
@@ -45,8 +45,6 @@ The default MCP tools are intentionally small:
 | `godot_context` | Primary first call for understanding, locating, flow tracing, and edit planning. |
 | `godot_node` | Graph-backed source read for one indexed file, symbol, or graph node id. |
 | `godot_sync` | Manual recovery when the index needs to catch up. |
-
-Compatibility handlers such as `godot_search`, `godot_scene`, `godot_explore`, `godot_symbol`, `godot_callers`, `godot_callees`, `godot_impact`, and `godot_project_map` remain callable, but agents should normally start with `godot_context` and then narrow with `godot_node`.
 
 ## Compact Context Format
 
@@ -101,6 +99,8 @@ When either side of an edge is outside the visible node set, the formatter keeps
 
 `godot_context` can include snippets, but it is optimized for orientation and edit planning. Use `godot_node` when source for one target is needed.
 
+Write `godot_context.query` as a short keyword and identifier string. Prefer exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns. Avoid natural-language task wording such as `find`, `include paths`, `summarize`, `relevant for`, or `tell me`.
+
 `godot_node` supports three target modes:
 
 ```json
@@ -115,7 +115,9 @@ When either side of an edge is outside the visible node set, the formatter keeps
 { "id": "script:res://scripts/fixture_actor.gd" }
 ```
 
-File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source.
+File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source. Relationship notes are bounded; use `notes.omitted` to tell whether more relationships exist outside the response.
+
+For constants, enums, signal names, resource paths, or string protocols, graph navigation should be followed by a narrow `rg` or test check when complete reference proof matters.
 
 ## Missing Index Recovery
 
@@ -140,7 +142,7 @@ When a payload exceeds its budget, lower-priority snippets are dropped first, th
 
 Graph-backed answers include freshness metadata. If a selected indexed file has pending watcher or sync work, responses add `stale: true` and `staleFiles`. Agents should either run `godot_sync` or inspect only the named stale files before treating that response as final.
 
-`godot_sync` returns graph-index deltas. Its `added`, `modified`, and `deleted` fields describe indexed Godot files, not Git status.
+`godot_sync` returns graph-index delta counts. `addedCount`, `modifiedCount`, and `deletedCount` describe indexed Godot files, not Git status. Path lists are omitted by default to keep agent output compact.
 
 ## Privacy And Fixture Rules
 

@@ -9,15 +9,12 @@ import { createGraphDatabase, type GraphDatabase } from "../../../src/db/index.j
 import {
   insertEdge,
   insertUnresolvedRef,
+  listEdges,
+  listUnresolvedRefs,
   upsertFile,
   upsertNode,
 } from "../../../src/db/queries.js";
-import {
-  exploreGodotContext,
-  getCalleesContext,
-  getCallersContext,
-  getSymbolContext,
-} from "../../../src/context/explore.js";
+import { exploreGodotContext } from "../../../src/context/explore.js";
 import { indexGodotProject } from "../../../src/indexer/indexer.js";
 import type { EdgeKind, GraphFile, GraphNode, NodeKind } from "../../../src/types.js";
 
@@ -134,6 +131,61 @@ describe("agent context queries", () => {
       if (noiseIndex >= 0) {
         expect(entryPointNames.indexOf("ExactAlphaController")).toBeLessThan(noiseIndex);
       }
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps long planning queries focused on dense domain matches instead of generic UI noise", () => {
+    const graph = createTempGraph();
+    try {
+      function insertScriptClass(name: string, path: string): void {
+        addFile(graph, path);
+        addNode(graph, `script:${path}`, "script_class", name, name, path);
+      }
+
+      function insertProperty(name: string, owner: string, path: string): void {
+        addNode(graph, `property:${path}:${name}`, "property", name, `${owner}.${name}`, path);
+      }
+
+      insertScriptClass("WaveConfig", "res://spawn_fixture/wave_config.gd");
+      insertProperty("spawn_budget", "WaveConfig", "res://spawn_fixture/wave_config.gd");
+      insertScriptClass("EnemySpawnRunner", "res://spawn_fixture/enemy_spawn_runner.gd");
+      insertScriptClass("DamageFormula", "res://spawn_fixture/damage_formula.gd");
+      insertScriptClass("EnemyArchetypeCatalog", "res://spawn_fixture/enemy_archetype_catalog.gd");
+
+      insertScriptClass("FixtureHudSnapshotAdapter", "res://ui/fixture_hud_snapshot_adapter.gd");
+      insertScriptClass("RecordBuilderPanel", "res://ui/record_builder_panel.gd");
+      insertScriptClass("CurrentArchitecturePanel", "res://ui/current_architecture_panel.gd");
+      insertScriptClass("ComponentResourcePanel", "res://ui/component_resource_panel.gd");
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query:
+          "enemy spawn runner wave config spawn budget damage formula enemy archetype catalog spawn weights beginner advanced current architecture encounter tuning",
+        includeCode: false,
+      });
+      const entryPointNames = context.entryPoints
+        .map((id) => context.nodes.find((node) => node.id === id)?.name)
+        .filter(Boolean);
+
+      expect(entryPointNames.slice(0, 5)).toEqual(
+        expect.arrayContaining([
+          "WaveConfig",
+          "spawn_budget",
+          "EnemySpawnRunner",
+          "DamageFormula",
+          "EnemyArchetypeCatalog",
+        ]),
+      );
+      expect(entryPointNames.slice(0, 5)).not.toEqual(
+        expect.arrayContaining([
+          "FixtureHudSnapshotAdapter",
+          "RecordBuilderPanel",
+          "CurrentArchitecturePanel",
+          "ComponentResourcePanel",
+        ]),
+      );
     } finally {
       graph.close();
     }
@@ -323,13 +375,13 @@ describe("agent context queries", () => {
     }
   });
 
-  it("returns symbol details without code snippets when requested", () => {
+  it("returns matching symbol details without code snippets when requested", () => {
     const root = indexedFixture("minimal");
     const graph = createGraphDatabase(root);
     try {
-      const context = getSymbolContext(graph, {
+      const context = exploreGodotContext(graph, {
         projectRoot: root,
-        symbol: "FixtureActor",
+        query: "FixtureActor",
         includeCode: false,
       });
 
@@ -373,40 +425,50 @@ describe("agent context queries", () => {
     }
   });
 
-  it("returns callers and callees contexts", () => {
+  it("returns resolved call relationships in general context", () => {
     const root = indexedFixture("signals");
     const graph = createGraphDatabase(root);
     try {
-      const callers = getCallersContext(graph, {
+      const context = exploreGodotContext(graph, {
         projectRoot: root,
-        symbol: "damage",
+        query: "damage",
+        includeCode: false,
       });
-      expect(callers.relationships).toEqual(
+      expect(context.relationships).toEqual(
         expect.arrayContaining([
           expect.stringContaining(
             "method:res://scripts/signal_demo.gd:_on_start_button_pressed calls method:res://scripts/signal_demo.gd:damage",
           ),
         ]),
       );
-      expect(callers.relationships).not.toEqual(
+      expect(context.relationships).not.toEqual(
         expect.arrayContaining([
           expect.stringContaining("calls method:res://scripts/signal_demo.gd:damage (unresolved-match)"),
         ]),
       );
+    } finally {
+      graph.close();
+    }
+  });
 
-      const callees = getCalleesContext(graph, {
+  it("returns signal relationships in general context", () => {
+    const root = indexedFixture("signals");
+    const graph = createGraphDatabase(root);
+    try {
+      const context = exploreGodotContext(graph, {
         projectRoot: root,
-        symbol: "SignalDemo",
+        query: "health_depleted",
+        includeCode: false,
       });
-      expect(callees.relationships).not.toEqual(
+
+      expect(context.relationships).toEqual(
         expect.arrayContaining([
-          expect.stringContaining("calls damage (unresolved)"),
-        ]),
-      );
-      expect(callees.nodes.map((node) => node.id)).toEqual(
-        expect.arrayContaining([
-          "method:res://scripts/signal_demo.gd:_ready",
-          "method:res://scripts/signal_demo.gd:damage",
+          expect.stringContaining(
+            "method:res://scripts/signal_demo.gd:_ready connects_signal signal:res://scripts/signal_demo.gd:health_depleted",
+          ),
+          expect.stringContaining(
+            "method:res://scripts/signal_demo.gd:damage emits_signal signal:res://scripts/signal_demo.gd:health_depleted",
+          ),
         ]),
       );
     } finally {
@@ -471,26 +533,28 @@ describe("agent context queries", () => {
         candidates: [],
       });
 
-      const callers = getCallersContext(graph, {
+      expect(listEdges(graph, { kind: "calls" })).toEqual([
+        expect.objectContaining({
+          source: "script:res://scripts/resolved_caller.gd",
+          target: "method:res://scripts/a.gd:validate",
+        }),
+      ]);
+      expect(listUnresolvedRefs(graph)).toEqual([
+        expect.objectContaining({
+          fromNodeId: "script:res://scripts/caller.gd",
+          referenceName: "validate",
+          referenceKind: "calls",
+        }),
+      ]);
+      expect(exploreGodotContext(graph, {
         projectRoot: graph.projectRoot,
-        symbol: "validate",
+        query: "validate",
         includeCode: false,
-      });
-
-      expect(callers.relationships).toContain(
-        "script:res://scripts/resolved_caller.gd calls method:res://scripts/a.gd:validate (resolver)",
+      }).relationships).toEqual(
+        expect.arrayContaining([
+          "script:res://scripts/caller.gd calls validate (unresolved)",
+        ]),
       );
-      expect(callers.relationships).toContain(
-        "script:res://scripts/caller.gd calls validate (unresolved)",
-      );
-      expect(callers.relationships).not.toEqual(
-        expect.arrayContaining([expect.stringContaining("(unresolved-match)")]),
-      );
-      expect(callers.relationships.indexOf(
-        "script:res://scripts/resolved_caller.gd calls method:res://scripts/a.gd:validate (resolver)",
-      )).toBeLessThan(callers.relationships.indexOf(
-        "script:res://scripts/caller.gd calls validate (unresolved)",
-      ));
     } finally {
       graph.close();
     }
@@ -544,17 +608,23 @@ func _ready() -> void:
 
     const graph = createGraphDatabase(root);
     try {
-      const callers = getCallersContext(graph, {
-        projectRoot: root,
-        symbol: "request_fixture_feedback",
-        includeCode: false,
-      });
-
-      expect(callers.relationships).toContain(
-        "method:res://scripts/autoload_caller.gd:_ready calls method:res://scripts/fixture_fx.gd:request_fixture_feedback (resolver)",
+      expect(listEdges(graph, { kind: "calls" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/autoload_caller.gd:_ready",
+            target: "method:res://scripts/fixture_fx.gd:request_fixture_feedback",
+            provenance: "resolver",
+          }),
+        ]),
       );
-      expect(callers.relationships).not.toContain(
-        "method:res://scripts/autoload_caller.gd:_ready calls request_fixture_feedback (unresolved)",
+      expect(listUnresolvedRefs(graph)).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            fromNodeId: "method:res://scripts/autoload_caller.gd:_ready",
+            referenceName: "request_fixture_feedback",
+            referenceKind: "calls",
+          }),
+        ]),
       );
     } finally {
       graph.close();
@@ -656,17 +726,23 @@ func _on_fixture_feedback_requested() -> void:
 
     const graph = createGraphDatabase(root);
     try {
-      const callers = getCallersContext(graph, {
-        projectRoot: root,
-        symbol: "fixture_feedback_requested",
-        includeCode: false,
-      });
-
-      expect(callers.relationships).toContain(
-        "method:res://scripts/signal_caller.gd:_connect_example_signal connects_signal signal:res://scripts/fixture_fx.gd:fixture_feedback_requested (resolver)",
+      expect(listEdges(graph, { kind: "connects_signal" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/signal_caller.gd:_connect_example_signal",
+            target: "signal:res://scripts/fixture_fx.gd:fixture_feedback_requested",
+            provenance: "resolver",
+          }),
+        ]),
       );
-      expect(callers.relationships).not.toContain(
-        "method:res://scripts/signal_caller.gd:_connect_example_signal connects_signal fixture_feedback_requested (unresolved)",
+      expect(listUnresolvedRefs(graph)).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            fromNodeId: "method:res://scripts/signal_caller.gd:_connect_example_signal",
+            referenceName: "fixture_feedback_requested",
+            referenceKind: "connects_signal",
+          }),
+        ]),
       );
     } finally {
       graph.close();
@@ -698,19 +774,19 @@ func play() -> void:
 
     const graph = createGraphDatabase(root);
     try {
-      const callers = getCallersContext(graph, {
+      const context = exploreGodotContext(graph, {
         projectRoot: root,
-        symbol: "FIXTURE_STEP_NAME",
+        query: "FIXTURE_STEP_NAME",
         includeCode: false,
         maxFiles: 10,
       });
 
-      expect(callers.nodes.map((node) => node.id)).toContain(
+      expect(context.nodes.map((node) => node.id)).toContain(
         "property:res://scripts/step_catalog.gd:FIXTURE_STEP_NAME",
       );
-      expect(callers.files).toContain("res://scripts/step_catalog.gd");
-      expect(callers.files).toContain("res://scripts/step_reader.gd");
-      expect(callers.relationships).toEqual(
+      expect(context.files).toContain("res://scripts/step_catalog.gd");
+      expect(context.files).toContain("res://scripts/step_reader.gd");
+      expect(context.relationships).toEqual(
         expect.arrayContaining([
           expect.stringContaining(
             "method:res://scripts/step_reader.gd:play references_symbol property:res://scripts/step_catalog.gd:FIXTURE_STEP_NAME",
@@ -754,30 +830,29 @@ func read_value() -> int:
 
     const graph = createGraphDatabase(root);
     try {
-      const callers = getCallersContext(graph, {
-        projectRoot: root,
-        symbol: "SHARED_VALUE",
-        includeCode: false,
-        maxFiles: 10,
-      });
-
-      expect(callers.relationships).toEqual(
+      expect(listUnresolvedRefs(graph)).toEqual(
         expect.arrayContaining([
-          "method:res://scripts/ambiguous_reader.gd:read_value references_symbol SHARED_VALUE (unresolved)",
+          expect.objectContaining({
+            fromNodeId: "method:res://scripts/ambiguous_reader.gd:read_value",
+            referenceName: "SHARED_VALUE",
+            referenceKind: "references_symbol",
+          }),
         ]),
       );
-      expect(callers.relationships).not.toEqual(
+      expect(listEdges(graph, { kind: "references_symbol" })).not.toEqual(
         expect.arrayContaining([
-          expect.stringContaining(
-            "method:res://scripts/ambiguous_reader.gd:read_value references_symbol property:res://scripts/first_catalog.gd:SHARED_VALUE",
-          ),
+          expect.objectContaining({
+            source: "method:res://scripts/ambiguous_reader.gd:read_value",
+            target: "property:res://scripts/first_catalog.gd:SHARED_VALUE",
+          }),
         ]),
       );
-      expect(callers.relationships).not.toEqual(
+      expect(listEdges(graph, { kind: "references_symbol" })).not.toEqual(
         expect.arrayContaining([
-          expect.stringContaining(
-            "method:res://scripts/ambiguous_reader.gd:read_value references_symbol property:res://scripts/second_catalog.gd:SHARED_VALUE",
-          ),
+          expect.objectContaining({
+            source: "method:res://scripts/ambiguous_reader.gd:read_value",
+            target: "property:res://scripts/second_catalog.gd:SHARED_VALUE",
+          }),
         ]),
       );
     } finally {
@@ -785,63 +860,4 @@ func read_value() -> int:
     }
   });
 
-  it("documents current includeCode snippets start at file heads", () => {
-    const root = indexedFixture("minimal");
-    writeFileSync(
-      join(root, "scripts", "many_lines.gd"),
-      `extends Node
-class_name ManyLines
-
-func intro() -> void:
-\tpass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-func target_method() -> void:
-\tpass
-`,
-    );
-    writeFileSync(
-      join(root, "scripts", "snippet_caller.gd"),
-      `extends Node
-class_name SnippetCaller
-
-func call_it() -> void:
-\ttarget_method()
-`,
-    );
-    const result = indexGodotProject(root);
-    expect(result.ok).toBe(true);
-
-    const graph = createGraphDatabase(root);
-    try {
-      const callers = getCallersContext(graph, {
-        projectRoot: root,
-        symbol: "target_method",
-        includeCode: true,
-        maxFiles: 8,
-      });
-      const manyLinesSnippet = callers.snippets.find(
-        (snippet) => snippet.filePath === "res://scripts/many_lines.gd",
-      );
-
-      expect(manyLinesSnippet).toEqual(expect.objectContaining({ startLine: 1 }));
-      expect(manyLinesSnippet?.text).not.toContain("func target_method");
-    } finally {
-      graph.close();
-    }
-  });
 });

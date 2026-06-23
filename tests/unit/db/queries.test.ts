@@ -14,6 +14,7 @@ import {
   insertUnresolvedRef,
   listEdges,
   listUnresolvedRefs,
+  markUnresolvedRefsResolved,
   searchNodes,
   upsertFile,
   upsertNode,
@@ -170,6 +171,58 @@ describe("graph storage queries", () => {
 
       deleteUnresolvedRefs(graph, [unresolvedId]);
       expect(listUnresolvedRefs(graph, { filePath: file.path })).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("hides resolved refs by default while retaining them for resolver passes", () => {
+    const graph = createGraphDatabase(createTempProjectRoot());
+
+    try {
+      const file: GraphFile = {
+        path: "res://scripts/reference_source.gd",
+        kind: "gdscript",
+        contentHash: "abc123",
+        size: 42,
+        modifiedAt: 1000,
+        indexedAt: 2000,
+        nodeCount: 1,
+        parseErrors: [],
+      };
+      upsertFile(graph, file);
+
+      const methodNode: GraphNode = {
+        id: "method:res://scripts/reference_source.gd:_ready",
+        kind: "method",
+        name: "_ready",
+        qualifiedName: "ReferenceSource._ready",
+        filePath: file.path,
+        startLine: 5,
+        endLine: 8,
+        signature: "func _ready()",
+        metadata: {},
+        updatedAt: 3001,
+      };
+      upsertNode(graph, methodNode);
+
+      const ref: UnresolvedRef = {
+        fromNodeId: methodNode.id,
+        referenceName: "create",
+        referenceKind: "calls",
+        filePath: file.path,
+        line: 6,
+        column: 3,
+        candidates: [{ receiver: "ReferenceTarget" }],
+      };
+
+      const refId = insertUnresolvedRef(graph, ref);
+      markUnresolvedRefsResolved(graph, [refId]);
+
+      expect(listUnresolvedRefs(graph)).toEqual([]);
+      expect(listUnresolvedRefs(graph, { includeResolved: true })).toEqual([
+        { ...ref, id: refId, resolved: true },
+      ]);
     } finally {
       graph.close();
     }

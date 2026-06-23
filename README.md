@@ -38,7 +38,7 @@ npm install -g .
 Pass the Godot project root, the directory that contains `project.godot`:
 
 ```bash
-gdgraph init /path/to/godot/project
+gdgraph sync /path/to/godot/project
 ```
 
 The graph is stored at:
@@ -54,9 +54,11 @@ Common maintenance commands:
 ```bash
 gdgraph status /path/to/godot/project
 gdgraph sync /path/to/godot/project
-gdgraph rebuild /path/to/godot/project
+gdgraph sync /path/to/godot/project --rebuild
 gdgraph clean /path/to/godot/project
 ```
+
+`sync` is the normal create/update command. Use `sync --rebuild` when you need to discard the existing graph and index the project from scratch. Use `clean` only when you want to remove `.gdgraph` without rebuilding it.
 
 ## Connect An Agent
 
@@ -79,6 +81,12 @@ Install one target only:
 
 ```bash
 gdgraph install /path/to/godot/project --target codex
+```
+
+For Codex, the default install writes MCP config plus a managed `AGENTS.md` instruction block. To also install the optional global Codex skill into `~/.codex/skills`, pass `--with-skill`:
+
+```bash
+gdgraph install /path/to/godot/project --target codex --with-skill
 ```
 
 Restart the agent after installation. The generated MCP server command is usually:
@@ -105,9 +113,21 @@ Recommended agent flow:
 3. If `initialized` is `false` or `indexEmpty` is `true`, call `godot_sync` manually once, then retry `godot_context`.
 4. If `indexFresh` is `false`, call `godot_sync`.
 
-Do not use broad `grep`, glob, or raw file-reading loops to rebuild structure that is already indexed. Raw reads are still useful for unindexed files, files reported as stale, and external validation such as tests or compiler output.
+Write `godot_context.query` as a short keyword and identifier query, not a natural-language task. Prefer exact class names, methods, constants, fields, resource paths, file/path fragments, and domain nouns.
 
-Compatibility handlers still exist for CLI parity and debugging: `godot_search`, `godot_scene`, `godot_explore`, `godot_symbol`, `godot_callers`, `godot_callees`, `godot_impact`, and `godot_project_map`.
+Good:
+
+```text
+enemy_spawner spawn_wave WaveConfig export EnemyDefinition spawn_weight scene_path
+```
+
+Avoid:
+
+```text
+Find enemy spawning systems and wave config resources relevant for writing a design. Include paths and summary.
+```
+
+Do not use broad `grep`, glob, or raw file-reading loops to rebuild structure that is already indexed. Raw reads are still useful for unindexed files, files reported as stale, and external validation such as tests or compiler output.
 
 ## Suggested `AGENTS.md`
 
@@ -117,24 +137,25 @@ Compatibility handlers still exist for CLI parity and debugging: `godot_search`,
 This project uses `gdgraph` for indexed Godot structure.
 
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, call `godot_context` before broad file search.
+- For `godot_context.query`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
+- Do not write natural-language task instructions in `godot_context.query`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
 - Use `godot_node` to read indexed Godot source for a file, symbol, or graph node id.
 - Use `godot_status` to check graph freshness.
 - If `initialized` is false or `indexEmpty` is true, call `godot_sync` once before graph queries.
 - If `indexFresh` is false, call `godot_sync` or run `gdgraph sync <project>`.
 - Do not rebuild indexed Godot structure with broad `grep`, glob, or raw file-reading loops.
 - Directly read raw files only when a file is unindexed, listed as stale, or needed for external validation.
+- Treat `godot_context.truncated` and `godot_node.notes.omitted` as bounded navigation output, not exhaustive proof. For constants, enums, signal names, resource paths, or string protocols, add a narrow `rg` or test check.
 - If MCP tools are unavailable, use the `gdgraph` CLI first, then read the few source files it identifies.
 ```
 
 ## CLI Examples
 
 ```bash
-gdgraph search FixtureActor --path /path/to/godot/project
-gdgraph scene res://fixture_main.tscn --path /path/to/godot/project
-gdgraph explore FixtureActor --path /path/to/godot/project
-gdgraph callers apply_damage --path /path/to/godot/project
-gdgraph callees FixtureActor --path /path/to/godot/project
-gdgraph impact res://scripts/fixture_actor.gd --path /path/to/godot/project
+gdgraph sync /path/to/godot/project
+gdgraph context FixtureActor --path /path/to/godot/project
+gdgraph node --path /path/to/godot/project --symbol FixtureActor
+gdgraph node --path /path/to/godot/project --file res://scripts/fixture_actor.gd --limit 80
 ```
 
 ## Indexed Data
@@ -169,11 +190,15 @@ flowchart LR
   E --> F["Agent"]
 ```
 
-`gdgraph serve --mcp` runs a catch-up sync on startup when possible. If the graph may lag behind disk, tool responses report stale or pending files.
+`gdgraph sync` is incremental after the first index: it updates changed Godot files, removes deleted file records, and recomputes resolver-owned relationships without rewriting unchanged indexed files. `gdgraph sync --rebuild` removes `.gdgraph` first, then performs a fresh full index. Sync output reports change counts and omits path lists by default to keep CLI and agent context compact.
+
+`gdgraph serve --mcp` runs a catch-up sync on startup when possible. If the graph may lag behind disk, tool responses report stale or pending files. The watcher, when active, only tracks pending files and schedules the same sync path.
 
 ## Limits
 
 `gdgraph` is static analysis. It does not run the Godot project.
+
+`parseErrors` are gdgraph parser/extractor errors only. `parseErrorScope: "gdgraph_static_parse"` and `compilerChecked: false` mean Godot compiler/editor import validation still requires running Godot or project tests separately.
 
 It avoids guessing runtime-only behavior such as dynamic node creation, complex type flow, or string-built paths. Unresolved references stay visible instead of being turned into false edges.
 
@@ -189,8 +214,8 @@ npm run gdgraph -- version
 Try the minimal fixture:
 
 ```bash
-npm run gdgraph -- init tests/fixtures/godot/minimal
-npm run gdgraph -- explore FixtureActor --path tests/fixtures/godot/minimal
+npm run gdgraph -- sync tests/fixtures/godot/minimal
+npm run gdgraph -- context FixtureActor --path tests/fixtures/godot/minimal
 ```
 
 Run the privacy check:

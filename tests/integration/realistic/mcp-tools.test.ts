@@ -38,133 +38,82 @@ afterEach(() => {
 });
 
 describe("realistic Godot MCP knowledge graph tools", () => {
-  it("returns project map and scene details from the indexed graph", () => {
+  it("returns status and sync metadata through final MCP tools", () => {
     const root = indexedRealisticFixture();
-    const projectMap = parseTextContent(callGodotMcpTool("godot_project_map", { projectPath: root }));
 
-    expect(projectMap).toEqual(
+    expect(parseTextContent(callGodotMcpTool("godot_status", { projectPath: root }))).toEqual(
+      expect.objectContaining({
+        ok: true,
+        initialized: true,
+        indexFresh: true,
+        fileCount: 7,
+      }),
+    );
+
+    expect(parseTextContent(callGodotMcpTool("godot_sync", { projectPath: root }))).toEqual(
       expect.objectContaining({
         ok: true,
         indexFresh: true,
-        project: expect.objectContaining({
-          name: "RealisticFixture",
-          mainScene: "res://scenes/fixture_main.tscn",
-        }),
-        filesByKind: expect.arrayContaining([
-          { kind: "gdscript", count: 3 },
-          { kind: "scene", count: 2 },
-        ]),
-        scenes: expect.arrayContaining([
-          expect.objectContaining({ id: "scene:res://scenes/fixture_main.tscn" }),
-        ]),
-        scripts: expect.arrayContaining([
-          expect.objectContaining({ id: "script:res://scripts/actors/fixture_actor.gd" }),
-        ]),
+        fileCount: 7,
+        addedCount: 0,
+        modifiedCount: 0,
+        deletedCount: 0,
       }),
     );
-    expect(projectMap).not.toHaveProperty("files");
-
-    const scene = parseTextContent(
-      callGodotMcpTool("godot_scene", {
-        projectPath: root,
-        scenePath: "res://scenes/fixture_main.tscn",
-      }),
-    );
-    expect(scene).toEqual(
-      expect.objectContaining({
-        ok: true,
-        paths: expect.objectContaining({
-          p1: "res://scenes/fixture_main.tscn",
-          p2: "res://scripts/controllers/main_controller.gd",
-          p3: "res://scenes/fixture_actor.tscn",
-        }),
-        scene: expect.objectContaining({
-          graphId: "scene:res://scenes/fixture_main.tscn",
-          path: "p1",
-        }),
-        nodes: expect.arrayContaining([
-          expect.objectContaining({
-            graphId: "scene_node:res://scenes/fixture_main.tscn:Main",
-            type: "Node2D",
-            parentPath: null,
-            scriptPath: "p2",
-          }),
-          expect.objectContaining({
-            graphId: "scene_node:res://scenes/fixture_main.tscn:FixtureActor",
-            instanceScenePath: "p3",
-          }),
-          expect.objectContaining({
-            graphId: "scene_node:res://scenes/fixture_main.tscn:UI/HealthBar",
-            parentPath: "UI",
-          }),
-        ]),
-      }),
-    );
-    expect((scene.nodes as Array<Record<string, unknown>>)[0]).not.toHaveProperty("metadata");
-    expect((scene.nodes as Array<Record<string, unknown>>)[0]).not.toHaveProperty("updatedAt");
   });
 
-  it("returns agent-ready explore, callers, and impact context from real graph relationships", () => {
+  it("returns context and exact node reads through final MCP tools", () => {
     const root = indexedRealisticFixture();
 
-    expect(
-      parseTextContent(
-        callGodotMcpTool("godot_explore", {
-          projectPath: root,
-          query: "FixtureActor",
-          includeCode: false,
-        }),
-      ),
-    ).toEqual(
+    const context = parseTextContent(
+      callGodotMcpTool("godot_context", {
+        projectPath: root,
+        query: "FixtureActor",
+        includeCode: false,
+      }),
+    );
+    expect(context).toEqual(
       expect.objectContaining({
         ok: true,
         context: expect.objectContaining({
           nodes: expect.arrayContaining([
             expect.objectContaining({ graphId: "script:res://scripts/actors/fixture_actor.gd" }),
             expect.objectContaining({ graphId: "scene_node:res://scenes/fixture_actor.tscn:FixtureActor" }),
-            expect.objectContaining({ graphId: "resource:res://resources/fixture_stats.tres" }),
           ]),
           relationships: expect.arrayContaining([
             expect.objectContaining({ kind: "attaches_script" }),
           ]),
         }),
+        nextTools: expect.arrayContaining([
+          expect.objectContaining({ tool: "godot_node" }),
+        ]),
       }),
     );
 
     expect(
       parseTextContent(
-        callGodotMcpTool("godot_callers", {
+        callGodotMcpTool("godot_node", {
           projectPath: root,
           symbol: "advance_night",
+          file: "res://scripts/autoload/fixture_state.gd",
           includeCode: false,
         }),
       ),
     ).toEqual(
       expect.objectContaining({
         ok: true,
-        context: expect.objectContaining({
-          relationships: expect.arrayContaining([
-            expect.objectContaining({ kind: "calls" }),
+        target: expect.objectContaining({
+          id: "method:res://scripts/autoload/fixture_state.gd:advance_night",
+          kind: "method",
+          filePath: "res://scripts/autoload/fixture_state.gd",
+        }),
+        notes: expect.objectContaining({
+          callers: expect.arrayContaining([
+            expect.objectContaining({
+              id: "method:res://scripts/controllers/main_controller.gd:_ready",
+            }),
           ]),
         }),
-      }),
-    );
-
-    expect(
-      parseTextContent(
-        callGodotMcpTool("godot_impact", {
-          projectPath: root,
-          target: "res://scripts/actors/fixture_actor.gd",
-        }),
-      ),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        affectedScenes: expect.arrayContaining([
-          expect.objectContaining({ graphId: "scene:res://scenes/fixture_actor.tscn" }),
-          expect.objectContaining({ graphId: "scene:res://scenes/fixture_main.tscn" }),
-        ]),
-        recommendedCheckFiles: expect.arrayContaining(["p1", "p2", "p3"]),
       }),
     );
   });

@@ -30,13 +30,6 @@ function textContent(result: { content: Array<{ type: string; text?: string }> }
   return result.content.find((item) => item.type === "text")?.text ?? "";
 }
 
-function responseMetrics(text: string): { chars: number; pathRefs: number } {
-  return {
-    chars: text.length,
-    pathRefs: text.match(/res:\/\/[^"\s,)]+/g)?.length ?? 0,
-  };
-}
-
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     globalPendingFileTracker.clearPending(root);
@@ -56,6 +49,11 @@ describe("MCP Godot tools", () => {
     expect(instructions).toContain("indexFresh");
     expect(instructions).toContain("lastSyncAtSource");
     expect(instructions).toContain("godot_sync");
+    expect(instructions).toContain("truncated=true");
+    expect(instructions).toContain("notes.omitted");
+    expect(instructions).toContain("constants, enums, signal names, resource paths, or string protocols");
+    expect(instructions).toContain("terse identifier-heavy keyword queries");
+    expect(instructions).toContain("Do not write natural-language task instructions");
     expect(instructions).not.toContain("godot_project_map");
     expect(instructions).not.toContain("For focused follow-up, use godot_search and godot_scene");
   });
@@ -71,9 +69,41 @@ describe("MCP Godot tools", () => {
     expect(tools.find((tool) => tool.name === "godot_context")?.description).toContain(
       "Primary",
     );
+    expect(tools.find((tool) => tool.name === "godot_context")?.description).toContain(
+      "identifier-heavy keyword",
+    );
+    expect(
+      tools.find((tool) => tool.name === "godot_context")?.inputSchema.properties.query,
+    ).toEqual(
+      expect.objectContaining({
+        description: expect.stringContaining("Do not write natural-language task instructions"),
+      }),
+    );
     expect(tools.find((tool) => tool.name === "godot_node")?.description).toContain(
       "indexed source",
     );
+  });
+
+  it("rejects removed legacy MCP tools", () => {
+    const legacyTools = [
+      "godot_search",
+      "godot_scene",
+      "godot_explore",
+      "godot_symbol",
+      "godot_callers",
+      "godot_callees",
+      "godot_impact",
+      "godot_project_map",
+    ];
+
+    for (const toolName of legacyTools) {
+      expect(parseTextContent(callGodotMcpTool(toolName, { projectPath: "." }))).toEqual(
+        expect.objectContaining({
+          ok: false,
+          error: `Unknown tool: ${toolName}`,
+        }),
+      );
+    }
   });
 
   it("syncs through MCP and reports freshness metadata", () => {
@@ -89,7 +119,7 @@ describe("MCP Godot tools", () => {
     globalPendingFileTracker.markPending(root, "res://scripts/mcp_added.gd");
 
     expect(
-      parseTextContent(callGodotMcpTool("godot_search", { projectPath: root, query: "FixtureActor" })),
+      parseTextContent(callGodotMcpTool("godot_context", { projectPath: root, query: "FixtureActor" })),
     ).toEqual(
       expect.objectContaining({
         ok: true,
@@ -106,11 +136,10 @@ describe("MCP Godot tools", () => {
     );
 
     expect(
-      parseTextContent(callGodotMcpTool("godot_search", { projectPath: root, query: "NoSuchSymbol" })),
+      parseTextContent(callGodotMcpTool("godot_context", { projectPath: root, query: "NoSuchSymbol" })),
     ).toEqual(
       expect.objectContaining({
         ok: true,
-        results: [],
         indexFresh: false,
         stale: true,
       }),
@@ -120,10 +149,11 @@ describe("MCP Godot tools", () => {
     expect(sync).toEqual(
       expect.objectContaining({
         ok: true,
-        added: ["res://scripts/mcp_added.gd"],
         addedCount: 1,
-        addedOmitted: 0,
+        changeListsOmitted: true,
         changeScope: "graph_index",
+        parseErrorScope: "gdgraph_static_parse",
+        compilerChecked: false,
         message: expect.stringContaining("graph index"),
         indexFresh: true,
         pendingFiles: [],
@@ -135,6 +165,9 @@ describe("MCP Godot tools", () => {
         }),
       }),
     );
+    expect(sync).not.toHaveProperty("added");
+    expect(sync).not.toHaveProperty("modified");
+    expect(sync).not.toHaveProperty("deleted");
   });
 
   it("returns primary Godot context with next tool guidance", () => {
@@ -207,6 +240,37 @@ describe("MCP Godot tools", () => {
       }),
     );
     expect(response.context as Record<string, unknown>).not.toHaveProperty("files");
+  });
+
+  it("returns structured retry guidance when the graph database is locked", () => {
+    const root = copyFixture("minimal");
+    indexGodotProject(root);
+    const locker = createGraphDatabase(root);
+
+    try {
+      locker.sqlite.exec("BEGIN EXCLUSIVE");
+      const response = parseTextContent(
+        callGodotMcpTool("godot_context", {
+          projectPath: root,
+          query: "FixtureActor",
+        }),
+      );
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          ok: false,
+          reason: "locked",
+          retryAfterMs: expect.any(Number),
+          nextTools: expect.arrayContaining([
+            expect.objectContaining({ tool: "godot_status" }),
+            expect.objectContaining({ tool: "godot_sync" }),
+          ]),
+        }),
+      );
+    } finally {
+      locker.sqlite.exec("ROLLBACK");
+      locker.close();
+    }
   });
 
   it("uses a godot_context graphId as a godot_node target", () => {
@@ -415,13 +479,13 @@ describe("MCP Godot tools", () => {
     }
 
     const response = parseTextContent(
-      callGodotMcpTool("godot_impact", { projectPath: root, target: "FixtureActor" }),
+      callGodotMcpTool("godot_context", { projectPath: root, query: "FixtureActor" }),
     );
 
     expect(response).toEqual(
       expect.objectContaining({
         ok: false,
-        tool: "godot_impact",
+        tool: "godot_context",
         error: expect.stringContaining("JSON"),
       }),
     );
@@ -519,106 +583,6 @@ describe("MCP Godot tools", () => {
     );
   });
 
-  it("queries an indexed fixture through project map, search, and scene tools", () => {
-    const root = copyFixture("minimal");
-    const indexResult = indexGodotProject(root);
-    expect(indexResult.ok).toBe(true);
-
-    expect(parseTextContent(callGodotMcpTool("godot_project_map", { projectPath: root }))).toEqual(
-      expect.objectContaining({
-        ok: true,
-        indexFresh: true,
-        project: expect.objectContaining({
-          name: "MinimalFixture",
-          mainScene: "res://fixture_main.tscn",
-        }),
-      }),
-    );
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_search", { projectPath: root, query: "FixtureActor" })),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        paths: expect.objectContaining({
-          p1: "res://scripts/fixture_actor.gd",
-        }),
-        results: expect.arrayContaining([
-          expect.objectContaining({
-            graphId: "script:res://scripts/fixture_actor.gd",
-            kind: "script_class",
-            path: "p1",
-          }),
-        ]),
-      }),
-    );
-
-    const pathSearch = parseTextContent(
-      callGodotMcpTool("godot_search", { projectPath: root, query: "fixture_actor.gd" }),
-    );
-    expect(pathSearch).toEqual(
-      expect.objectContaining({
-        ok: true,
-        results: expect.arrayContaining([
-          expect.objectContaining({
-            graphId: "script:res://scripts/fixture_actor.gd",
-            kind: "script_class",
-          }),
-        ]),
-      }),
-    );
-    expect((pathSearch.results as Array<{ graphId: string }>).map((node) => node.graphId)).not.toContain(
-      "resource:res://scripts/fixture_actor.gd",
-    );
-
-    expect(
-      parseTextContent(
-        callGodotMcpTool("godot_scene", {
-          projectPath: root,
-          scenePath: "res://fixture_main.tscn",
-        }),
-      ),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        paths: expect.objectContaining({
-          p1: "res://fixture_main.tscn",
-          p2: "res://scripts/fixture_actor.gd",
-        }),
-        scene: expect.objectContaining({
-          graphId: "scene:res://fixture_main.tscn",
-          path: "p1",
-        }),
-        nodes: expect.arrayContaining([
-          expect.objectContaining({
-            graphId: "scene_node:res://fixture_main.tscn:FixtureActor",
-            scriptPath: "p2",
-          }),
-        ]),
-      }),
-    );
-  });
-
-  it("keeps legacy focused tools callable for compatibility", () => {
-    const root = copyFixture("minimal");
-    const indexResult = indexGodotProject(root);
-    expect(indexResult.ok).toBe(true);
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_search", { projectPath: root, query: "FixtureActor" })),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        results: expect.arrayContaining([
-          expect.objectContaining({
-            graphId: "script:res://scripts/fixture_actor.gd",
-            kind: "script_class",
-          }),
-        ]),
-      }),
-    );
-  });
-
   it("reads indexed file source through godot_node", () => {
     const root = copyFixture("minimal");
     const indexResult = indexGodotProject(root);
@@ -674,6 +638,67 @@ describe("MCP Godot tools", () => {
           filePath: "res://scripts/fixture_actor.gd",
           text: expect.stringContaining("class_name FixtureActor"),
         }),
+      }),
+    );
+  });
+
+  it("scopes godot_node symbol lookup by file when both are provided", () => {
+    const root = copyFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "node_scope_a.gd"),
+      "extends Node\nclass_name NodeScopeA\n\nfunc shared_name() -> void:\n\tpass\n",
+    );
+    writeFileSync(
+      join(root, "scripts", "node_scope_b.gd"),
+      "extends Node\nclass_name NodeScopeB\n\nfunc shared_name() -> void:\n\tpass\n",
+    );
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_node", {
+        projectPath: root,
+        file: "res://scripts/node_scope_b.gd",
+        symbol: "shared_name",
+      }),
+    );
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        target: expect.objectContaining({
+          id: "method:res://scripts/node_scope_b.gd:shared_name",
+          filePath: "res://scripts/node_scope_b.gd",
+        }),
+        source: expect.objectContaining({
+          filePath: "res://scripts/node_scope_b.gd",
+          text: expect.stringContaining("func shared_name() -> void:"),
+        }),
+      }),
+    );
+  });
+
+  it("rejects mixed godot_node id selectors", () => {
+    const root = copyFixture("minimal");
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_node", {
+        projectPath: root,
+        id: "script:res://scripts/fixture_actor.gd",
+        symbol: "FixtureActor",
+      }),
+    );
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: "godot_node id selector cannot be combined with file or symbol.",
+        indexFresh: true,
+        pendingFiles: [],
+        watcher: "disabled",
+        lastSyncAt: expect.any(Number),
       }),
     );
   });
@@ -752,6 +777,64 @@ func after() -> void:
     expect(notes.dependencies).toEqual(expect.any(Array));
   });
 
+  it("prioritizes cross-file symbol references in bounded godot_node notes", () => {
+    const root = copyFixture("minimal");
+    writeFileSync(
+      join(root, "scripts", "step_catalog.gd"),
+      [
+        "extends Node",
+        "class_name StepCatalog",
+        "",
+        "const FIXTURE_STEP_NAME := \"entry\"",
+        "",
+        ...Array.from(
+          { length: 12 },
+          (_, index) => [
+            `func local_read_${index}() -> String:`,
+            "\treturn FIXTURE_STEP_NAME",
+            "",
+          ].join("\n"),
+        ),
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(root, "scripts", "step_reader.gd"),
+      [
+        "extends Node",
+        "class_name StepReader",
+        "",
+        "func play() -> String:",
+        "\treturn StepCatalog.FIXTURE_STEP_NAME",
+        "",
+      ].join("\n"),
+    );
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_node", {
+        projectPath: root,
+        symbol: "StepCatalog.FIXTURE_STEP_NAME",
+        includeCode: false,
+      }),
+    );
+    const notes = response.notes as Record<string, unknown>;
+    const dependents = notes.dependents as Array<Record<string, unknown>>;
+    const omitted = notes.omitted as Record<string, unknown>;
+
+    expect(notes.limit).toBe(8);
+    expect(omitted.dependents).toBeGreaterThan(0);
+    expect(dependents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "method",
+          name: "play",
+          filePath: "res://scripts/step_reader.gd",
+        }),
+      ]),
+    );
+  });
+
   it("reads indexed scene node source through godot_node", () => {
     const root = copyFixture("minimal");
     const indexResult = indexGodotProject(root);
@@ -816,66 +899,7 @@ func after() -> void:
     );
   });
 
-  it("queries agent-first context tools", () => {
-    const root = copyFixture("signals");
-    const indexResult = indexGodotProject(root);
-    expect(indexResult.ok).toBe(true);
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_explore", { projectPath: root, query: "SignalDemo" })),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        context: expect.objectContaining({
-          nodes: expect.arrayContaining([
-            expect.objectContaining({ graphId: "script:res://scripts/signal_demo.gd" }),
-          ]),
-          relationships: expect.any(Array),
-        }),
-      }),
-    );
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_symbol", { projectPath: root, symbol: "health_depleted" })),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        context: expect.objectContaining({
-          nodes: expect.arrayContaining([
-            expect.objectContaining({ graphId: "signal:res://scripts/signal_demo.gd:health_depleted" }),
-          ]),
-        }),
-      }),
-    );
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_callers", { projectPath: root, symbol: "damage" })),
-    ).toEqual(expect.objectContaining({
-      ok: true,
-      context: expect.objectContaining({ relationships: expect.any(Array) }),
-    }));
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_callees", { projectPath: root, symbol: "SignalDemo" })),
-    ).toEqual(expect.objectContaining({
-      ok: true,
-      context: expect.objectContaining({ nodes: expect.any(Array) }),
-    }));
-
-    expect(
-      parseTextContent(callGodotMcpTool("godot_impact", { projectPath: root, target: "health_depleted" })),
-    ).toEqual(
-      expect.objectContaining({
-        ok: true,
-        paths: expect.objectContaining({
-          p1: "res://scripts/signal_demo.gd",
-        }),
-        recommendedCheckFiles: expect.arrayContaining(["p1"]),
-      }),
-    );
-  });
-
-  it("keeps primary and legacy MCP graph responses compact", () => {
+  it("keeps primary MCP graph responses compact", () => {
     const root = copyFixture("realistic-game");
     rmSync(join(root, ".gdgraph"), { force: true, recursive: true });
     const indexResult = indexGodotProject(root);
@@ -888,54 +912,22 @@ func after() -> void:
         includeCode: true,
         maxFiles: 8,
       }),
-      godot_explore: callGodotMcpTool("godot_explore", {
-        projectPath: root,
-        query: "FixtureActor MainController FixtureState signal input scene",
-        includeCode: true,
-        maxFiles: 8,
-      }),
-      godot_symbol: callGodotMcpTool("godot_symbol", {
+      godot_node: callGodotMcpTool("godot_node", {
         projectPath: root,
         symbol: "FixtureActor",
         includeCode: true,
-        maxFiles: 8,
-      }),
-      godot_callees: callGodotMcpTool("godot_callees", {
-        projectPath: root,
-        symbol: "FixtureActor",
-        includeCode: true,
-        maxFiles: 8,
-      }),
-      godot_impact: callGodotMcpTool("godot_impact", {
-        projectPath: root,
-        target: "res://scripts/actors/fixture_actor.gd",
-      }),
-      godot_search: callGodotMcpTool("godot_search", {
-        projectPath: root,
-        query: "FixtureActor",
-        limit: 20,
       }),
     };
 
     const metrics = Object.fromEntries(
-      Object.entries(calls).map(([tool, result]) => [tool, responseMetrics(textContent(result))]),
-    ) as Record<keyof typeof calls, { chars: number; pathRefs: number }>;
+      Object.entries(calls).map(([tool, result]) => [tool, textContent(result).length]),
+    ) as Record<keyof typeof calls, number>;
 
-    expect(metrics.godot_context.chars).toBeLessThan(8_000);
-    expect(metrics.godot_context.pathRefs).toBeLessThan(40);
-    expect(metrics.godot_explore.chars).toBeLessThan(8_000);
-    expect(metrics.godot_explore.pathRefs).toBeLessThan(40);
-    expect(metrics.godot_symbol.chars).toBeLessThan(8_000);
-    expect(metrics.godot_symbol.pathRefs).toBeLessThan(40);
-    expect(metrics.godot_callees.chars).toBeLessThan(8_000);
-    expect(metrics.godot_callees.pathRefs).toBeLessThan(40);
-    expect(metrics.godot_impact.chars).toBeLessThan(6_000);
-    expect(metrics.godot_impact.pathRefs).toBeLessThan(40);
-    expect(metrics.godot_search.chars).toBeLessThan(4_000);
-    expect(metrics.godot_search.pathRefs).toBeLessThan(20);
+    expect(metrics.godot_context).toBeLessThan(8_000);
+    expect(metrics.godot_node).toBeLessThan(8_000);
   });
 
-  it("summarizes large MCP sync file lists", () => {
+  it("omits large MCP sync file lists", () => {
     const root = copyFixture("minimal");
     indexGodotProject(root);
     for (let index = 0; index < 30; index += 1) {
@@ -952,14 +944,14 @@ func after() -> void:
       expect.objectContaining({
         ok: true,
         addedCount: 30,
-        addedOmitted: 10,
         modifiedCount: 0,
-        modifiedOmitted: 0,
         deletedCount: 0,
-        deletedOmitted: 0,
+        changeListsOmitted: true,
       }),
     );
-    expect(response.added).toHaveLength(20);
+    expect(response).not.toHaveProperty("added");
+    expect(response).not.toHaveProperty("modified");
+    expect(response).not.toHaveProperty("deleted");
     expect(responseText).not.toContain("bulk_added_29.gd");
     expect(responseText.length).toBeLessThan(4_000);
   });

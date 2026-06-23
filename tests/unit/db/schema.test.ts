@@ -46,6 +46,11 @@ describe("createGraphDatabase", () => {
           "unresolved_refs",
         ]),
       );
+
+      const unresolvedRefColumns = graph.sqlite
+        .pragma("table_info(unresolved_refs)")
+        .map((row) => (row as { name: string }).name);
+      expect(unresolvedRefColumns).toContain("resolved");
     } finally {
       graph.close();
     }

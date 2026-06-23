@@ -7,12 +7,16 @@ import {
   countEdges,
   countNodes,
   countUnresolvedRefs,
+  deleteFilesFromGraph,
+  deleteResolverEdges,
+  getProjectMetadata,
   insertEdge,
   insertUnresolvedRef,
   upsertFile,
   upsertNode,
   upsertProjectMetadata,
 } from "../db/queries.js";
+import { listIndexedFiles } from "../graph/queries.js";
 import { extractGdscriptGraph } from "./extract-gdscript.js";
 import { extractProjectGodotGraph } from "./extract-project.js";
 import { extractGodotResourceGraph } from "./extract-resource.js";
@@ -50,6 +54,12 @@ interface CollectedGraph {
   unresolvedRefs: UnresolvedRef[];
   parseErrors: string[];
   projectMetadata: Record<string, unknown> | null;
+}
+
+export interface IncrementalIndexGodotProjectOptions {
+  changedAbsolutePaths: string[];
+  deletedPaths: string[];
+  currentResPaths: string[];
 }
 
 export function indexGodotProject(projectRoot: string): IndexGodotProjectResult {
@@ -111,14 +121,100 @@ export function indexGodotProject(projectRoot: string): IndexGodotProjectResult 
   }
 }
 
-function collectGraph(absolutePaths: string[], projectRoot: string): CollectedGraph {
+export function indexGodotProjectIncremental(
+  projectRoot: string,
+  options: IncrementalIndexGodotProjectOptions,
+): IndexGodotProjectResult {
+  const graph = createGraphDatabase(projectRoot);
+  try {
+    const existingProjectMetadata = getStoredProjectMetadata(graph);
+    const collected = collectGraph(options.changedAbsolutePaths, projectRoot, {
+      knownFilePaths: new Set(options.currentResPaths),
+      projectMetadata: existingProjectMetadata,
+    });
+
+    const applyChanges = graph.sqlite.transaction(() => {
+      deleteFilesFromGraph(graph, [
+        ...options.deletedPaths,
+        ...collected.files.map((file) => file.path),
+      ]);
+
+      for (const file of collected.files) {
+        upsertFile(graph, file);
+      }
+
+      for (const node of collected.nodes) {
+        upsertNode(graph, node);
+      }
+
+      for (const edge of uniqueEdges(collected.edges)) {
+        insertEdge(graph, edge);
+      }
+
+      for (const unresolvedRef of uniqueUnresolvedRefs(collected.unresolvedRefs)) {
+        insertUnresolvedRef(graph, unresolvedRef);
+      }
+
+      deleteResolverEdges(graph);
+      resolveGraph(graph);
+
+      if (collected.projectMetadata !== existingProjectMetadata) {
+        upsertProjectMetadata(graph, {
+          key: "index",
+          value: {
+            project: collected.projectMetadata,
+          },
+          updatedAt: Date.now(),
+        });
+      }
+    });
+    applyChanges();
+
+    const indexedFiles = listIndexedFiles(graph);
+    return {
+      ok: true,
+      projectRoot,
+      databasePath: graph.databasePath,
+      fileCount: indexedFiles.length,
+      nodeCount: countNodes(graph),
+      edgeCount: countEdges(graph),
+      unresolvedRefCount: countUnresolvedRefs(graph),
+      parseErrors: indexedParseErrors(indexedFiles),
+    };
+  } finally {
+    graph.close();
+  }
+}
+
+function getStoredProjectMetadata(graph: ReturnType<typeof createGraphDatabase>): Record<string, unknown> | null {
+  const metadata = getProjectMetadata(graph, "index");
+  const project = metadata?.value.project;
+  return typeof project === "object" && project !== null && !Array.isArray(project)
+    ? project as Record<string, unknown>
+    : null;
+}
+
+function indexedParseErrors(files: GraphFile[]): string[] {
+  return files.flatMap((file) => file.parseErrors.map((error) => `${file.path}: ${error}`));
+}
+
+interface CollectGraphOptions {
+  knownFilePaths?: Set<string>;
+  projectMetadata?: Record<string, unknown> | null;
+}
+
+function collectGraph(
+  absolutePaths: string[],
+  projectRoot: string,
+  options: CollectGraphOptions = {},
+): CollectedGraph {
   const collected: CollectedGraph = {
     files: [],
     nodes: [],
     edges: [],
     unresolvedRefs: [],
     parseErrors: [],
-    projectMetadata: null,
+    projectMetadata: options.projectMetadata ?? null,
   };
   const updatedAt = Date.now();
 
@@ -162,15 +258,15 @@ function collectGraph(absolutePaths: string[], projectRoot: string): CollectedGr
     collected.files.push(fileRecord(absolutePath, resPath, fileKind, contents, fileParseErrors, collected.nodes.length - beforeNodeCount));
   }
 
-  detachMissingFileReferences(collected);
+  detachMissingFileReferences(collected, options.knownFilePaths);
   filterAutoloadCandidateRefs(collected);
   recountFileNodes(collected);
 
   return collected;
 }
 
-function detachMissingFileReferences(collected: CollectedGraph): void {
-  const indexedFiles = new Set(collected.files.map((file) => file.path));
+function detachMissingFileReferences(collected: CollectedGraph, knownFilePaths?: Set<string>): void {
+  const indexedFiles = knownFilePaths ?? new Set(collected.files.map((file) => file.path));
 
   collected.nodes = collected.nodes.map((node) => {
     if (node.filePath === null || indexedFiles.has(node.filePath)) {

@@ -2,29 +2,25 @@ import { Command } from "commander";
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import {
-  exploreGodotContext,
-  getCalleesContext,
-  getCallersContext,
-} from "../context/explore.js";
+import { formatAgentContext } from "../context/agent-output.js";
+import { exploreGodotContext } from "../context/explore.js";
+import { getNodePayload } from "../context/node-payload.js";
 import { createGraphDatabase } from "../db/index.js";
-import { getImpactContext } from "../graph/impact.js";
-import {
-  findSymbols,
-  getProjectOverview,
-  getSceneDetails,
-  listIndexedFiles,
-} from "../graph/queries.js";
-import { indexGodotProject } from "../indexer/indexer.js";
+import { getProjectOverview } from "../graph/queries.js";
 import {
   installGdgraphMcp,
   type InstallerTarget,
   uninstallGdgraphMcp,
 } from "../installer/index.js";
 import { serveGodotMcp, type ServeGodotMcpOptions } from "../mcp/server.js";
-import { searchGraph } from "../search/index.js";
+import { detectGodotProject } from "../project.js";
 import { attachFreshness, getScanAwareGraphFreshness } from "../sync/freshness.js";
-import { syncGodotProject } from "../sync/index.js";
+import { syncGodotProject, type SyncGodotProjectOk } from "../sync/index.js";
+
+const SYNC_MESSAGE =
+  "Synchronized graph index. Counts describe graph index changes, not Git status. Path lists are omitted to keep output compact.";
+const REBUILD_SYNC_MESSAGE =
+  "Rebuilt graph index from scratch. Counts describe files inserted into the new graph index, not Git status. Path lists are omitted to keep output compact.";
 
 export interface CliProgramOptions {
   version: string;
@@ -52,39 +48,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
     });
 
   program
-    .command("init")
-    .argument("[path]", "Godot project path")
-    .description("Initialize gdgraph storage and run a full index")
-    .action((projectPath?: string) => {
-      writeJson(write, indexGodotProject(resolveProjectPath(cwd, projectPath)));
-    });
-
-  program
-    .command("index")
-    .argument("[path]", "Godot project path")
-    .description("Rebuild the gdgraph index")
-    .action((projectPath?: string) => {
-      writeJson(write, indexGodotProject(resolveProjectPath(cwd, projectPath)));
-    });
-
-  program
-    .command("rebuild")
-    .argument("[path]", "Godot project path")
-    .description("Rebuild the gdgraph index")
-    .action((projectPath?: string) => {
-      writeJson(write, indexGodotProject(resolveProjectPath(cwd, projectPath)));
-    });
-
-  program
     .command("clean")
-    .argument("[path]", "Godot project path")
-    .description("Remove gdgraph storage without rebuilding")
-    .action((projectPath?: string) => {
-      writeJson(write, cleanGdgraphStorage(resolveProjectPath(cwd, projectPath)));
-    });
-
-  program
-    .command("uninit")
     .argument("[path]", "Godot project path")
     .description("Remove gdgraph storage without rebuilding")
     .action((projectPath?: string) => {
@@ -94,20 +58,33 @@ export function createCliProgram(options: CliProgramOptions): Command {
   program
     .command("sync")
     .argument("[path]", "Godot project path")
-    .description("Synchronize changed Godot files into the graph index")
-    .action((projectPath?: string) => {
-      const result = syncGodotProject(resolveProjectPath(cwd, projectPath));
+    .option("--rebuild", "Remove existing gdgraph storage before syncing")
+    .description("Create, update, or rebuild the graph index")
+    .action((projectPath?: string, commandOptions?: { rebuild?: boolean }) => {
+      const root = resolveProjectPath(cwd, projectPath);
+      const rebuild = commandOptions?.rebuild ?? false;
+      if (rebuild) {
+        const detected = detectGodotProject(root);
+        if (!detected.ok) {
+          writeJson(write, {
+            ok: false,
+            projectRoot: detected.root,
+            reason: detected.reason,
+            message: detected.message,
+            rebuilt: false,
+          });
+          return;
+        }
+        cleanGdgraphStorage(root);
+      }
+
+      const result = syncGodotProject(root);
       if (!result.ok) {
-        writeJson(write, result);
+        writeJson(write, rebuild ? { ...result, rebuilt: false } : result);
         return;
       }
 
-      writeJson(write, {
-        ...result,
-        addedCount: result.added.length,
-        modifiedCount: result.modified.length,
-        deletedCount: result.deleted.length,
-      });
+      writeJson(write, compactCliSyncPayload(result, rebuild));
     });
 
   program
@@ -139,149 +116,69 @@ export function createCliProgram(options: CliProgramOptions): Command {
     });
 
   program
-    .command("files")
-    .argument("[path]", "Godot project path")
-    .description("List indexed Godot files")
-    .action((projectPath?: string) => {
-      const root = resolveProjectPath(cwd, projectPath);
-      const unavailable = uninitializedStatus(root);
-      if (unavailable) {
-        writeJson(write, unavailable);
-        return;
-      }
-
-      withGraph(root, (graph) => {
-        writeJson(write, {
-          ok: true,
-          files: listIndexedFiles(graph),
-        });
-      });
-    });
-
-  program
-    .command("search")
-    .argument("<query>", "Search query")
+    .command("context")
+    .argument("<query>", "Godot graph context query")
     .option("--path <path>", "Godot project path")
-    .description("Search indexed graph nodes")
-    .action((query: string, commandOptions: { path?: string }) => {
-      const root = resolveProjectPath(cwd, commandOptions.path);
-      const unavailable = uninitializedStatus(root);
-      if (unavailable) {
-        writeJson(write, unavailable);
-        return;
-      }
-
-      withGraph(root, (graph) => {
-        writeJson(write, {
-          ok: true,
-          results: searchGraph(graph, query),
-        });
-      });
-    });
-
-  program
-    .command("scene")
-    .argument("<scene-path>", "Scene resource path")
-    .option("--path <path>", "Godot project path")
-    .description("Show indexed scene details")
-    .action((scenePath: string, commandOptions: { path?: string }) => {
-      const root = resolveProjectPath(cwd, commandOptions.path);
-      const unavailable = uninitializedStatus(root);
-      if (unavailable) {
-        writeJson(write, unavailable);
-        return;
-      }
-
-      withGraph(root, (graph) => {
-        writeJson(write, {
-          ok: true,
-          ...getSceneDetails(graph, scenePath),
-        });
-      });
-    });
-
-  program
-    .command("symbol")
-    .argument("<name>", "Symbol name")
-    .option("--path <path>", "Godot project path")
-    .description("Find indexed symbols")
-    .action((name: string, commandOptions: { path?: string }) => {
-      const root = resolveProjectPath(cwd, commandOptions.path);
-      const unavailable = uninitializedStatus(root);
-      if (unavailable) {
-        writeJson(write, unavailable);
-        return;
-      }
-
-      withGraph(root, (graph) => {
-        writeJson(write, {
-          ok: true,
-          results: findSymbols(graph, name),
-        });
-      });
-    });
-
-  program
-    .command("explore")
-    .argument("<query>", "Feature, symbol, scene, or resource query")
-    .option("--path <path>", "Godot project path")
-    .option("--no-code", "Exclude source snippets")
-    .description("Return an Agent-ready Godot context package")
-    .action((query: string, commandOptions: { path?: string; code?: boolean }) => {
-      withInitializedGraphCommand(cwd, commandOptions.path, write, (graph, root) => ({
-        ok: true,
-        ...exploreGodotContext(graph, {
+    .option("--code", "Include source snippets")
+    .option("--max-files <number>", "Maximum files to include")
+    .description("Return a compact Godot graph navigation package")
+    .action((query: string, commandOptions: { path?: string; code?: boolean; maxFiles?: string }) => {
+      withInitializedGraphCommand(cwd, commandOptions.path, write, (graph, root) => {
+        const context = exploreGodotContext(graph, {
           projectRoot: root,
           query,
-          includeCode: commandOptions.code ?? true,
-        }),
-      }));
+          maxFiles: optionalCliNumber(commandOptions.maxFiles) ?? 6,
+          includeCode: commandOptions.code ?? false,
+        });
+        return attachFreshness(
+          {
+            ok: true,
+            query,
+            ...getProjectOverview(graph),
+            context: formatAgentContext(context, {
+              maxChars: 4_800,
+              maxNodes: 40,
+              maxRelationships: 40,
+              maxSnippets: 6,
+            }),
+          },
+          getScanAwareGraphFreshness(root, graph),
+        );
+      });
     });
 
   program
-    .command("callers")
-    .argument("<symbol>", "Symbol to find callers for")
+    .command("node")
     .option("--path <path>", "Godot project path")
-    .option("--no-code", "Exclude source snippets")
-    .description("Return caller context")
-    .action((symbol: string, commandOptions: { path?: string; code?: boolean }) => {
-      withInitializedGraphCommand(cwd, commandOptions.path, write, (graph, root) => ({
-        ok: true,
-        ...getCallersContext(graph, {
-          projectRoot: root,
-          symbol,
-          includeCode: commandOptions.code ?? true,
+    .option("--file <res-path>", "Indexed file path")
+    .option("--symbol <name>", "Indexed symbol name")
+    .option("--id <graph-id>", "Indexed graph node id")
+    .option("--offset <number>", "Source line offset")
+    .option("--limit <number>", "Source line limit")
+    .option("--no-code", "Exclude source text")
+    .option("--symbols-only", "Return symbols without source text")
+    .description("Read indexed source for one Godot file, symbol, or graph node")
+    .action((commandOptions: {
+      path?: string;
+      file?: string;
+      symbol?: string;
+      id?: string;
+      offset?: string;
+      limit?: string;
+      code?: boolean;
+      symbolsOnly?: boolean;
+    }) => {
+      withInitializedGraphCommand(cwd, commandOptions.path, write, (graph, root) =>
+        getNodePayload(graph, root, {
+          file: commandOptions.file,
+          symbol: commandOptions.symbol,
+          id: commandOptions.id,
+          offset: optionalCliNumber(commandOptions.offset),
+          limit: optionalCliNumber(commandOptions.limit),
+          includeCode: commandOptions.code,
+          symbolsOnly: commandOptions.symbolsOnly,
         }),
-      }));
-    });
-
-  program
-    .command("callees")
-    .argument("<symbol>", "Symbol to find callees for")
-    .option("--path <path>", "Godot project path")
-    .option("--no-code", "Exclude source snippets")
-    .description("Return callee context")
-    .action((symbol: string, commandOptions: { path?: string; code?: boolean }) => {
-      withInitializedGraphCommand(cwd, commandOptions.path, write, (graph, root) => ({
-        ok: true,
-        ...getCalleesContext(graph, {
-          projectRoot: root,
-          symbol,
-          includeCode: commandOptions.code ?? true,
-        }),
-      }));
-    });
-
-  program
-    .command("impact")
-    .argument("<target>", "Symbol or file path to analyze")
-    .option("--path <path>", "Godot project path")
-    .description("Return impact context before editing")
-    .action((target: string, commandOptions: { path?: string }) => {
-      withInitializedGraphCommand(cwd, commandOptions.path, write, (graph) => ({
-        ok: true,
-        ...getImpactContext(graph, target),
-      }));
+      );
     });
 
   program
@@ -300,7 +197,6 @@ export function createCliProgram(options: CliProgramOptions): Command {
 
       const serveMcp = options.serveMcp ?? serveGodotMcp;
       const projectRoot = resolveProjectPath(cwd, projectPath);
-      syncGodotProject(projectRoot);
       await serveMcp({
         projectRoot,
       });
@@ -312,11 +208,12 @@ export function createCliProgram(options: CliProgramOptions): Command {
     .option("--target <target>", "Installer target: all, codex, claude, cursor, opencode, gemini, or kiro", "all")
     .option("--home <path>", "Home directory for user-scoped Agent config")
     .option("--command <command>", "gdgraph executable command", "gdgraph")
+    .option("--with-skill", "Also install the Codex global skill when the codex target is selected")
     .description("Install gdgraph MCP configuration for supported Agents")
     .action(
       (
         projectPath: string | undefined,
-        commandOptions: { target: string; home?: string; command: string },
+        commandOptions: { target: string; home?: string; command: string; withSkill?: boolean },
       ) => {
         writeJson(
           write,
@@ -325,6 +222,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
             homeDir: commandOptions.home,
             command: commandOptions.command,
             target: parseInstallerTarget(commandOptions.target),
+            withSkill: commandOptions.withSkill ?? false,
           }),
         );
       },
@@ -336,11 +234,12 @@ export function createCliProgram(options: CliProgramOptions): Command {
     .option("--target <target>", "Installer target: all, codex, claude, cursor, opencode, gemini, or kiro", "all")
     .option("--home <path>", "Home directory for user-scoped Agent config")
     .option("--command <command>", "gdgraph executable command", "gdgraph")
+    .option("--with-skill", "Also remove the generated Codex global skill when the codex target is selected")
     .description("Remove gdgraph MCP configuration from supported Agents")
     .action(
       (
         projectPath: string | undefined,
-        commandOptions: { target: string; home?: string; command: string },
+        commandOptions: { target: string; home?: string; command: string; withSkill?: boolean },
       ) => {
         writeJson(
           write,
@@ -349,6 +248,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
             homeDir: commandOptions.home,
             command: commandOptions.command,
             target: parseInstallerTarget(commandOptions.target),
+            withSkill: commandOptions.withSkill ?? false,
           }),
         );
       },
@@ -388,7 +288,7 @@ function uninitializedStatus(root: string): Record<string, unknown> | null {
     initialized: false,
     projectRoot: root,
     dbPath,
-    message: "No gdgraph index found. Run gdgraph init first.",
+    message: "No gdgraph index found. Run gdgraph sync first.",
   };
 }
 
@@ -404,6 +304,19 @@ function cleanGdgraphStorage(projectRoot: string): Record<string, unknown> {
     projectRoot,
     graphDir,
     removed,
+  };
+}
+
+function compactCliSyncPayload(result: SyncGodotProjectOk, rebuilt: boolean): Record<string, unknown> {
+  const { added, modified, deleted, message: _message, ...rest } = result;
+  return {
+    ...rest,
+    ...(rebuilt ? { rebuilt: true } : {}),
+    addedCount: added.length,
+    modifiedCount: modified.length,
+    deletedCount: deleted.length,
+    changeListsOmitted: true,
+    message: rebuilt ? REBUILD_SYNC_MESSAGE : SYNC_MESSAGE,
   };
 }
 
@@ -432,6 +345,14 @@ function withInitializedGraphCommand(
   withGraph(root, (graph) => {
     writeJson(write, callback(graph, root));
   });
+}
+
+function optionalCliNumber(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function writeJson(write: (text: string) => void, value: unknown): void {

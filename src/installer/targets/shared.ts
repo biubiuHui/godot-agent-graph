@@ -17,12 +17,14 @@ export interface InstallerOptions {
   projectRoot?: string;
   homeDir?: string;
   command?: string;
+  withSkill?: boolean;
 }
 
 export interface InstallerTargetOptions {
   projectRoot: string;
   homeDir: string;
   spec: McpServerSpec;
+  withSkill: boolean;
 }
 
 export interface InstallerTargetResult {
@@ -45,6 +47,7 @@ export function normalizeInstallerOptions(options: InstallerOptions): InstallerT
   return {
     projectRoot,
     homeDir: resolve(options.homeDir ?? homedir()),
+    withSkill: options.withSkill ?? false,
     spec: {
       name: "godot-agent-graph",
       command,

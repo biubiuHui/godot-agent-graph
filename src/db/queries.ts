@@ -58,6 +58,7 @@ interface UnresolvedRefRow {
   file_path: string;
   line: number | null;
   column: number | null;
+  resolved: number;
   candidates: string;
 }
 
@@ -97,6 +98,28 @@ export function clearGraph(graph: GraphDatabase): void {
   `);
 }
 
+export function deleteFilesFromGraph(graph: GraphDatabase, paths: string[]): void {
+  const uniquePaths = [...new Set(paths)];
+  if (uniquePaths.length === 0) {
+    return;
+  }
+
+  const selectNodeIds = graph.sqlite.prepare("select id from nodes where file_path = ?");
+  const deleteFts = graph.sqlite.prepare("delete from nodes_fts where id = ?");
+  const deleteFile = graph.sqlite.prepare("delete from files where path = ?");
+  const transaction = graph.sqlite.transaction((filePaths: string[]) => {
+    for (const path of filePaths) {
+      const nodeIds = selectNodeIds.all(path) as Array<{ id: string }>;
+      for (const row of nodeIds) {
+        deleteFts.run(row.id);
+      }
+      deleteFile.run(path);
+    }
+  });
+
+  transaction(uniquePaths);
+}
+
 export function countNodes(graph: GraphDatabase): number {
   return countRows(graph, "nodes");
 }
@@ -106,7 +129,10 @@ export function countEdges(graph: GraphDatabase): number {
 }
 
 export function countUnresolvedRefs(graph: GraphDatabase): number {
-  return countRows(graph, "unresolved_refs");
+  const row = graph.sqlite
+    .prepare("select count(*) as count from unresolved_refs where resolved = 0")
+    .get() as { count: number } | undefined;
+  return row?.count ?? 0;
 }
 
 export function getFile(graph: GraphDatabase, path: string): GraphFile | null {
@@ -408,6 +434,10 @@ export function insertEdge(graph: GraphDatabase, edge: GraphEdge): number {
   return Number(result.lastInsertRowid);
 }
 
+export function deleteResolverEdges(graph: GraphDatabase): void {
+  graph.sqlite.prepare("delete from edges where provenance = 'resolver'").run();
+}
+
 export interface EdgeFilter {
   source?: string;
   target?: string;
@@ -473,13 +503,14 @@ export function insertUnresolvedRef(graph: GraphDatabase, ref: UnresolvedRef): n
   const result = graph.sqlite
     .prepare(
       `insert into unresolved_refs (
-        from_node_id, reference_name, reference_kind, file_path, line, column, candidates
+        from_node_id, reference_name, reference_kind, file_path, line, column, resolved, candidates
       ) values (
-        @fromNodeId, @referenceName, @referenceKind, @filePath, @line, @column, @candidates
+        @fromNodeId, @referenceName, @referenceKind, @filePath, @line, @column, @resolved, @candidates
       )`,
     )
     .run({
       ...ref,
+      resolved: ref.resolved === true ? 1 : 0,
       candidates: stringifyJson(ref.candidates),
     });
 
@@ -501,9 +532,29 @@ export function deleteUnresolvedRefs(graph: GraphDatabase, ids: number[]): void 
   transaction(ids);
 }
 
+export function resetUnresolvedRefResolution(graph: GraphDatabase): void {
+  graph.sqlite.prepare("update unresolved_refs set resolved = 0").run();
+}
+
+export function markUnresolvedRefsResolved(graph: GraphDatabase, ids: number[]): void {
+  if (ids.length === 0) {
+    return;
+  }
+
+  const statement = graph.sqlite.prepare("update unresolved_refs set resolved = 1 where id = ?");
+  const transaction = graph.sqlite.transaction((values: number[]) => {
+    for (const id of values) {
+      statement.run(id);
+    }
+  });
+
+  transaction(ids);
+}
+
 export interface UnresolvedRefFilter {
   fromNodeId?: string;
   filePath?: string;
+  includeResolved?: boolean;
 }
 
 export function listUnresolvedRefs(
@@ -521,6 +572,10 @@ export function listUnresolvedRefs(
   if (filter.filePath) {
     where.push("file_path = @filePath");
     params.filePath = filter.filePath;
+  }
+
+  if (filter.includeResolved !== true) {
+    where.push("resolved = 0");
   }
 
   const sql = `select * from unresolved_refs${
@@ -589,6 +644,7 @@ function unresolvedRefFromRow(row: UnresolvedRefRow): UnresolvedRef {
     filePath: row.file_path,
     line: row.line,
     column: row.column,
+    ...(row.resolved === 1 ? { resolved: true } : {}),
     candidates: parseJson<JsonObject[]>(row.candidates),
   };
 }

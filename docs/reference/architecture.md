@@ -31,7 +31,7 @@ Parsers extract:
 
 ## Index Flow
 
-`indexGodotProject` scans the project, parses files, writes graph records, then runs the resolver. Full indexing clears old graph records before writing the new graph.
+`indexGodotProject` scans the project, parses files, writes graph records, then runs the resolver. Full indexing is the explicit rebuild path and clears old graph records before writing the new graph.
 
 Missing external resources can still appear as resource reference nodes, but they are detached from `files` so stale scene references do not break indexing.
 
@@ -50,9 +50,9 @@ The resolver turns extracted unresolved references into graph edges when project
 
 ## Sync and Watcher
 
-`syncGodotProject` compares stored file hashes with the current scan and reports added, modified, and deleted files. It then refreshes the graph through the full index flow, which keeps resolver output consistent and removes stale nodes and edges.
+`syncGodotProject` compares stored file hashes with the current scan and reports added, modified, and deleted files. It incrementally deletes records owned by deleted or modified files, inserts records extracted from changed files, and recomputes resolver-owned edges from retained reference candidates. Unchanged file records are not rewritten by ordinary sync.
 
-The watcher only discovers file changes, records pending files, and debounces sync. Sync remains the source of truth because watcher events can be coalesced or platform-specific.
+The watcher only discovers file changes, records pending files, and debounces the same sync path. Sync remains the source of truth because watcher events can be coalesced, duplicated, dropped, disabled, or platform-specific.
 
 Graph writes use a `.gdgraph/graph.lock` file to prevent concurrent sync/index writes.
 
@@ -61,12 +61,11 @@ Graph writes use a `.gdgraph/graph.lock` file to prevent concurrent sync/index w
 Graph query APIs power both CLI and MCP:
 
 - project overview and indexed files
-- scene details
-- symbol search
 - traversal neighborhoods
-- callers/callees
-- impact analysis
 - Agent-ready context packages with bounded source snippets
+- exact indexed source reads by file, symbol, or graph node id
+
+The public query model is intentionally small: `status`, `sync`, `context`, and `node`. Scene, resource, signal, autoload, node-path, call, and symbol-reference data remain indexed graph capabilities, but old standalone query products are not part of the current API surface.
 
 ## MCP Server
 

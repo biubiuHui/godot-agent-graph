@@ -12,8 +12,7 @@ export function logMcpError(
       level: "error",
       event,
       ...details,
-      error: errorMessage(error),
-      stack: errorStack(error),
+      error: redactLocalPaths(errorMessage(error)),
     })}`,
   );
 }
@@ -22,6 +21,8 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function errorStack(error: unknown): string | undefined {
-  return error instanceof Error ? error.stack : undefined;
+function redactLocalPaths(value: string): string {
+  return value
+    .replace(/\/(?:Users|Volumes|private|var|tmp)\/[^\s"'{}[\],)]+/g, "[local-path]")
+    .replace(/[A-Za-z]:\\[^\s"'{}[\],)]+/g, "[local-path]");
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,18 @@ function tempRoot(prefix: string): string {
 
 function readText(path: string): string {
   return readFileSync(path, "utf8");
+}
+
+function codexGlobalSkillPath(homeDir: string): string {
+  return join(homeDir, ".codex", "skills", "godot-graph-navigation", "SKILL.md");
+}
+
+function codexGlobalSkillOpenAiYamlPath(homeDir: string): string {
+  return join(homeDir, ".codex", "skills", "godot-graph-navigation", "agents", "openai.yaml");
+}
+
+function codexProjectSkillPath(projectRoot: string): string {
+  return join(projectRoot, ".agents", "skills", "godot-graph-navigation", "SKILL.md");
 }
 
 afterEach(() => {
@@ -71,6 +83,7 @@ startup_timeout_sec = 60
 # godot-agent-graph:end codex
 `,
     );
+    expect(readText(configPath)).not.toContain("approval_mode = \"approve\"");
     expect(readText(agentsPath)).toBe(`# Project Notes
 
 Keep this line.
@@ -79,11 +92,66 @@ Keep this line.
 ## Godot Graph Navigation
 
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool \`godot_context\` before broad file search.
+- For \`godot_context.query\`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
+- Do not write natural-language task instructions in \`godot_context.query\`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
 - Use \`godot_node\` for indexed Godot source reads instead of raw file reads.
-- If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\` or \`gdgraph explore <query> --path <project>\`.
-- Before edits, refactors, reviews, or debugging changes, use \`godot_context\` for edit-planning and blast-radius context; use \`godot_impact\` only when a dedicated compatibility impact report is needed.
+- If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\`, then \`gdgraph context <query> --path <project>\`.
+- Before edits, refactors, reviews, or debugging changes, use \`godot_context\` for edit-planning and bounded relationship context.
+- Treat \`godot_context.truncated\` and \`godot_node.notes.omitted\` as signs that the graph returned a bounded navigation summary, not exhaustive proof; use a narrow \`rg\` or tests for constants, enums, signal names, resource paths, and string protocols.
 <!-- godot-agent-graph:end codex-instructions -->
 `);
+    expect(existsSync(codexGlobalSkillPath(homeDir))).toBe(false);
+    expect(existsSync(codexProjectSkillPath(projectRoot))).toBe(false);
+  });
+
+  it("optionally installs the Codex global skill", () => {
+    const homeDir = tempRoot("gdgraph-installer-home-");
+    const projectRoot = tempRoot("gdgraph-installer-project-");
+
+    const result = installGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+      withSkill: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        action: "installed",
+        configPath: join(homeDir, ".codex", "config.toml"),
+        message: "Installed gdgraph Codex MCP configuration. Installed Codex global skill.",
+        target: "codex",
+      }),
+    ]);
+    expect(readText(codexGlobalSkillPath(homeDir))).toContain("name: godot-graph-navigation");
+    expect(readText(codexGlobalSkillPath(homeDir))).toContain("terse identifier-heavy keyword queries");
+    expect(readText(codexGlobalSkillOpenAiYamlPath(homeDir))).toContain(
+      'display_name: "Godot Graph Navigation"',
+    );
+    expect(existsSync(codexProjectSkillPath(projectRoot))).toBe(false);
+  });
+
+  it("preserves an existing custom Codex global skill on install", () => {
+    const homeDir = tempRoot("gdgraph-installer-home-");
+    const projectRoot = tempRoot("gdgraph-installer-project-");
+    const skillPath = codexGlobalSkillPath(homeDir);
+    mkdirSync(join(homeDir, ".codex", "skills", "godot-graph-navigation"), { recursive: true });
+    writeFileSync(skillPath, "custom skill\n");
+
+    const result = installGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+      withSkill: true,
+    });
+
+    expect(result.results[0]?.message).toBe(
+      "Installed gdgraph Codex MCP configuration. Codex global skill already exists and was left unchanged.",
+    );
+    expect(readText(skillPath)).toBe("custom skill\n");
   });
 
   it("updates the owned Codex fallback instructions without duplicating them", () => {
@@ -116,6 +184,52 @@ Outro
     expect(text).toContain("godot_context");
     expect(text).not.toContain("old text");
     expect(text.match(/godot-agent-graph:begin codex-instructions/g)).toHaveLength(1);
+  });
+
+  it("replaces old owned Codex tool approval overrides during reinstall", () => {
+    const homeDir = tempRoot("gdgraph-installer-home-");
+    const projectRoot = tempRoot("gdgraph-installer-project-");
+    const configPath = join(homeDir, ".codex", "config.toml");
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    writeFileSync(
+      configPath,
+      `model = "gpt-5-codex"
+
+# godot-agent-graph:begin codex
+[mcp_servers.godot-agent-graph]
+command = "gdgraph"
+args = ["serve", "--mcp", "${projectRoot}"]
+enabled = true
+startup_timeout_sec = 60
+
+[mcp_servers.godot-agent-graph.tools.godot_node]
+approval_mode = "approve"
+# godot-agent-graph:end codex
+`,
+    );
+
+    const result = installGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(readText(configPath)).toBe(
+      `model = "gpt-5-codex"
+
+# godot-agent-graph:begin codex
+[mcp_servers.godot-agent-graph]
+command = "gdgraph"
+args = ["serve", "--mcp", "${projectRoot}"]
+enabled = true
+startup_timeout_sec = 60
+# godot-agent-graph:end codex
+`,
+    );
+    expect(readText(configPath)).not.toContain("approval_mode = \"approve\"");
+    expect(readText(configPath)).not.toContain("godot-agent-graph.tools.godot_node");
   });
 
   it("uses an absolute Node launch spec for Codex when installed from the gdgraph bin", () => {
@@ -226,6 +340,57 @@ command = "context7"
 
 Keep me.
 `);
+  });
+
+  it("optionally uninstalls the generated Codex global skill", () => {
+    const homeDir = tempRoot("gdgraph-installer-home-");
+    const projectRoot = tempRoot("gdgraph-installer-project-");
+    installGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+      withSkill: true,
+    });
+    expect(existsSync(codexGlobalSkillPath(homeDir))).toBe(true);
+
+    const result = uninstallGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+      withSkill: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.results[0]?.message).toBe(
+      "Removed owned gdgraph Codex MCP configuration. Removed generated gdgraph Codex global skill.",
+    );
+    expect(existsSync(codexGlobalSkillPath(homeDir))).toBe(false);
+  });
+
+  it("preserves a user-modified Codex global skill on uninstall", () => {
+    const homeDir = tempRoot("gdgraph-installer-home-");
+    const projectRoot = tempRoot("gdgraph-installer-project-");
+    const skillPath = codexGlobalSkillPath(homeDir);
+    installGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+      withSkill: true,
+    });
+    writeFileSync(skillPath, `${readText(skillPath)}\nUser note.\n`);
+
+    uninstallGdgraphMcp({
+      target: "codex",
+      homeDir,
+      projectRoot,
+      command: "gdgraph",
+      withSkill: true,
+    });
+
+    expect(readText(skillPath)).toContain("User note.");
   });
 
   it("skips an unowned Codex gdgraph table instead of overwriting it", () => {

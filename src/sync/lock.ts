@@ -11,8 +11,8 @@ export interface GraphLockOptions {
   retryIntervalMs?: number;
 }
 
-const DEFAULT_RETRY_MS = 120;
-const DEFAULT_RETRY_INTERVAL_MS = 20;
+const DEFAULT_RETRY_MS = 1_000;
+const DEFAULT_RETRY_INTERVAL_MS = 50;
 
 export class GraphLockError extends Error {
   constructor(message: string) {

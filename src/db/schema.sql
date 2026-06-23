@@ -58,6 +58,7 @@ create table if not exists unresolved_refs (
   file_path text not null,
   line integer,
   column integer,
+  resolved integer not null default 0,
   candidates text not null default '[]',
   foreign key (from_node_id) references nodes(id) on delete cascade,
   foreign key (file_path) references files(path) on delete cascade
