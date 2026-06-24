@@ -6,6 +6,7 @@ import { getFile, getNode, listNodes, searchNodes } from "../db/queries.js";
 import { loadGraphSnapshot, visibleEdges } from "../graph/traversal.js";
 import { getScanAwareGraphFreshness } from "../sync/freshness.js";
 import type { GraphNode } from "../types.js";
+import { createAgentPathRefs, type AgentPathRefs } from "./agent-output.js";
 
 const NODE_NOTE_LIMIT = 8;
 
@@ -13,6 +14,35 @@ interface RelationshipNoteEntry {
   node: GraphNode;
   priority: number;
   order: number;
+}
+
+interface RawRelationshipNotes {
+  callers: GraphNode[];
+  callees: GraphNode[];
+  dependents: GraphNode[];
+  dependencies: GraphNode[];
+  limit: number;
+  omitted: {
+    callers: number;
+    callees: number;
+    dependents: number;
+    dependencies: number;
+  };
+}
+
+interface FilePayloadTarget {
+  kind: "file";
+  filePath: string;
+  fileKind: string;
+  nodeCount: number;
+}
+
+interface SourceWindowPayload {
+  filePath: string | null;
+  startLine: number;
+  endLine: number;
+  text: string;
+  missing?: boolean;
 }
 
 export function getNodePayload(
@@ -56,22 +86,14 @@ export function getNodePayload(
     };
   }
 
-  const payload: Record<string, unknown> = {
-    ok: true,
-    target: summarizeNode(node),
+  const staleFilePaths = selectedStaleFilePaths(graph, projectRoot, node.filePath ? [node.filePath] : []);
+  return formatNodePayload({
+    target: node,
+    symbols: symbolsOnly && node.filePath ? symbolsForFile(graph, node.filePath) : undefined,
     notes: relationshipNotesForNodes(graph, [node]),
-  };
-  attachSelectedStaleFiles(payload, graph, projectRoot, node.filePath ? [node.filePath] : []);
-
-  if (symbolsOnly && node.filePath) {
-    payload.symbols = symbolsForFile(graph, node.filePath);
-  }
-
-  if (includeCode && !symbolsOnly && node.filePath) {
-    payload.source = sourceForNode(graph, projectRoot, node);
-  }
-
-  return payload;
+    source: includeCode && !symbolsOnly && node.filePath ? sourceForNode(graph, projectRoot, node) : undefined,
+    staleFilePaths,
+  });
 }
 
 function getSymbolNodePayload(
@@ -92,22 +114,14 @@ function getSymbolNodePayload(
     };
   }
 
-  const payload: Record<string, unknown> = {
-    ok: true,
-    target: summarizeNode(node),
+  const staleFilePaths = selectedStaleFilePaths(graph, projectRoot, node.filePath ? [node.filePath] : []);
+  return formatNodePayload({
+    target: node,
+    symbols: symbolsOnly && node.filePath ? symbolsForFile(graph, node.filePath) : undefined,
     notes: relationshipNotesForNodes(graph, [node]),
-  };
-  attachSelectedStaleFiles(payload, graph, projectRoot, node.filePath ? [node.filePath] : []);
-
-  if (symbolsOnly && node.filePath) {
-    payload.symbols = symbolsForFile(graph, node.filePath);
-  }
-
-  if (includeCode && !symbolsOnly && node.filePath) {
-    payload.source = sourceForNode(graph, projectRoot, node);
-  }
-
-  return payload;
+    source: includeCode && !symbolsOnly && node.filePath ? sourceForNode(graph, projectRoot, node) : undefined,
+    staleFilePaths,
+  });
 }
 
 function getFileNodePayload(
@@ -127,8 +141,8 @@ function getFileNodePayload(
   }
 
   const symbols = symbolsForFile(graph, filePath);
-  const payload: Record<string, unknown> = {
-    ok: true,
+  const fileNodes = listNodes(graph).filter((node) => node.filePath === filePath);
+  return formatNodePayload({
     target: {
       kind: "file",
       filePath,
@@ -136,27 +150,20 @@ function getFileNodePayload(
       nodeCount: file.nodeCount,
     },
     symbols,
-    notes: relationshipNotesForNodes(
-      graph,
-      listNodes(graph).filter((node) => node.filePath === filePath),
-    ),
-  };
-  attachSelectedStaleFiles(payload, graph, projectRoot, [filePath]);
-
-  if (includeCode && !symbolsOnly) {
-    payload.source = sourceWindow(projectRoot, filePath, {
-      offset: optionalNumber(args, "offset") ?? 1,
-      limit: optionalNumber(args, "limit") ?? 80,
-    });
-  }
-
-  return payload;
+    notes: relationshipNotesForNodes(graph, fileNodes),
+    source: includeCode && !symbolsOnly
+      ? sourceWindow(projectRoot, filePath, {
+          offset: optionalNumber(args, "offset") ?? 1,
+          limit: optionalNumber(args, "limit") ?? 80,
+        })
+      : undefined,
+    staleFilePaths: selectedStaleFilePaths(graph, projectRoot, [filePath]),
+  });
 }
 
-function symbolsForFile(graph: GraphDatabase, filePath: string): Array<Record<string, unknown>> {
+function symbolsForFile(graph: GraphDatabase, filePath: string): GraphNode[] {
   return listNodes(graph)
-    .filter((node) => node.filePath === filePath)
-    .map(summarizeNode);
+    .filter((node) => node.filePath === filePath);
 }
 
 function findNodeForSymbol(graph: GraphDatabase, symbol: string, filePath: string | null): GraphNode | null {
@@ -171,19 +178,135 @@ function findNodeForSymbol(graph: GraphDatabase, symbol: string, filePath: strin
   );
 }
 
-function summarizeNode(node: GraphNode): Record<string, unknown> {
+function formatNodePayload(input: {
+  target: GraphNode | FilePayloadTarget;
+  symbols?: GraphNode[];
+  notes: RawRelationshipNotes;
+  source?: SourceWindowPayload;
+  staleFilePaths: string[];
+}): Record<string, unknown> {
+  const graphNodes = uniqueNodes([
+    ...(isGraphNode(input.target) ? [input.target] : []),
+    ...(input.symbols ?? []),
+    ...input.notes.callers,
+    ...input.notes.callees,
+    ...input.notes.dependents,
+    ...input.notes.dependencies,
+  ]);
+  const pathRefs = createAgentPathRefs(uniqueStrings([
+    ...graphNodes.flatMap((node) => node.filePath ? [node.filePath] : []),
+    ...(!isGraphNode(input.target) ? [input.target.filePath] : []),
+    ...(input.source?.filePath ? [input.source.filePath] : []),
+    ...input.staleFilePaths,
+  ]));
+  const nodeRefs = createNodeRefs(graphNodes);
+  const expandedNodeIds = new Set([
+    ...(isGraphNode(input.target) ? [input.target.id] : []),
+    ...(input.symbols ?? []).map((node) => node.id),
+  ]);
+
+  return removeUndefined({
+    ok: true,
+    ...(Object.keys(pathRefs.prefixes).length > 0 ? { prefixes: pathRefs.prefixes } : {}),
+    paths: pathRefs.paths,
+    target: isGraphNode(input.target)
+      ? formatGraphNode(input.target, pathRefs, nodeRefs)
+      : formatFileTarget(input.target, pathRefs),
+    symbols: input.symbols ? input.symbols.map((node) => formatGraphNode(node, pathRefs, nodeRefs)) : undefined,
+    notes: formatRelationshipNotes(input.notes, pathRefs, nodeRefs, expandedNodeIds),
+    source: input.source ? formatSource(input.source, pathRefs) : undefined,
+    stale: input.staleFilePaths.length > 0 ? true : undefined,
+    staleFiles: input.staleFilePaths.length > 0
+      ? input.staleFilePaths
+          .map((filePath) => pathRefs.pathToRef[filePath])
+          .filter((path): path is string => Boolean(path))
+      : undefined,
+  });
+}
+
+function formatFileTarget(target: FilePayloadTarget, pathRefs: AgentPathRefs): Record<string, unknown> {
   return {
-    id: node.id,
-    kind: node.kind,
-    name: node.name,
-    qualifiedName: node.qualifiedName,
-    filePath: node.filePath,
-    startLine: node.startLine,
-    signature: node.signature,
+    kind: "file",
+    path: pathRefs.pathToRef[target.filePath],
+    fileKind: target.fileKind,
+    nodeCount: target.nodeCount,
   };
 }
 
-function relationshipNotesForNodes(graph: GraphDatabase, nodes: GraphNode[]): Record<string, unknown> {
+function formatGraphNode(
+  node: GraphNode,
+  pathRefs: AgentPathRefs,
+  nodeRefs: Map<string, string>,
+): Record<string, unknown> {
+  return removeUndefined({
+    id: nodeRefs.get(node.id),
+    kind: node.kind,
+    name: node.name,
+    qname: displayQualifiedName(node),
+    path: node.filePath ? pathRefs.pathToRef[node.filePath] : undefined,
+    line: node.startLine ?? undefined,
+    signature: node.signature ?? undefined,
+  });
+}
+
+function displayQualifiedName(node: GraphNode): string | undefined {
+  if (!node.qualifiedName || node.qualifiedName === node.name) {
+    return undefined;
+  }
+  if (node.qualifiedName.startsWith("res://")) {
+    return undefined;
+  }
+  return node.qualifiedName;
+}
+
+function formatRelationshipNotes(
+  notes: RawRelationshipNotes,
+  pathRefs: AgentPathRefs,
+  nodeRefs: Map<string, string>,
+  expandedNodeIds: Set<string>,
+): Record<string, unknown> {
+  return {
+    callers: notes.callers.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
+    callees: notes.callees.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
+    dependents: notes.dependents.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
+    dependencies: notes.dependencies.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
+    limit: notes.limit,
+    omitted: notes.omitted,
+  };
+}
+
+function formatNoteNode(
+  node: GraphNode,
+  pathRefs: AgentPathRefs,
+  nodeRefs: Map<string, string>,
+  expandedNodeIds: Set<string>,
+): Record<string, unknown> {
+  const id = nodeRefs.get(node.id);
+  if (id && expandedNodeIds.has(node.id)) {
+    return { id };
+  }
+  return formatGraphNode(node, pathRefs, nodeRefs);
+}
+
+function formatSource(source: SourceWindowPayload, pathRefs: AgentPathRefs): Record<string, unknown> {
+  return removeUndefined({
+    path: source.filePath ? pathRefs.pathToRef[source.filePath] : null,
+    start: source.startLine,
+    end: source.endLine,
+    text: source.text,
+    missing: source.missing,
+  });
+}
+
+function createNodeRefs(nodes: GraphNode[]): Map<string, string> {
+  return new Map(nodes.map((node, index) => [node.id, `n${index + 1}`]));
+}
+
+function isGraphNode(value: GraphNode | FilePayloadTarget): value is GraphNode {
+  return "id" in value;
+}
+
+function relationshipNotesForNodes(graph: GraphDatabase, nodes: GraphNode[]): RawRelationshipNotes {
   const snapshot = loadGraphSnapshot(graph);
   const selectedIds = new Set(nodes.map((node) => node.id));
   const nodesById = new Map(snapshot.nodes.map((node) => [node.id, node]));
@@ -259,21 +382,16 @@ function relationshipNotesForNodes(graph: GraphDatabase, nodes: GraphNode[]): Re
   };
 }
 
-function attachSelectedStaleFiles(
-  payload: Record<string, unknown>,
+function selectedStaleFilePaths(
   graph: GraphDatabase,
   projectRoot: string,
   filePaths: string[],
-): void {
+): string[] {
   const selected = new Set(filePaths);
   const freshness = getScanAwareGraphFreshness(projectRoot, graph);
-  const staleFiles = freshness.pendingFiles
+  return freshness.pendingFiles
     .map((pending) => pending.path)
     .filter((path) => selected.has(path));
-  if (staleFiles.length > 0) {
-    payload.stale = true;
-    payload.staleFiles = staleFiles;
-  }
 }
 
 function isBehaviorEdge(kind: string): boolean {
@@ -304,12 +422,12 @@ function relationshipNotePriority(kind: string, source: GraphNode, target: Graph
 
 function summarizeNoteEntries(
   entries: RelationshipNoteEntry[],
-): { nodes: Array<Record<string, unknown>>; omitted: number } {
+): { nodes: GraphNode[]; omitted: number } {
   const unique = uniqueRelationshipNoteEntries(
     [...entries].sort((a, b) => a.priority - b.priority || a.order - b.order),
   );
   return {
-    nodes: unique.slice(0, NODE_NOTE_LIMIT).map((entry) => summarizeNode(entry.node)),
+    nodes: unique.slice(0, NODE_NOTE_LIMIT).map((entry) => entry.node),
     omitted: Math.max(0, unique.length - NODE_NOTE_LIMIT),
   };
 }
@@ -329,7 +447,7 @@ function sourceWindow(
   projectRoot: string,
   filePath: string,
   options: { offset: number; limit: number },
-): Record<string, unknown> {
+): SourceWindowPayload {
   const absolutePath = resPathToAbsolute(projectRoot, filePath);
   if (!existsSync(absolutePath)) {
     return {
@@ -353,7 +471,7 @@ function sourceWindow(
   };
 }
 
-function sourceForNode(graph: GraphDatabase, projectRoot: string, node: GraphNode): Record<string, unknown> {
+function sourceForNode(graph: GraphDatabase, projectRoot: string, node: GraphNode): SourceWindowPayload {
   if (!node.filePath) {
     return {
       filePath: null,
@@ -407,6 +525,27 @@ function clampInteger(value: number, min: number, max: number): number {
     return min;
   }
   return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function uniqueNodes(nodes: GraphNode[]): GraphNode[] {
+  const seen = new Set<string>();
+  return nodes.filter((node) => {
+    if (seen.has(node.id)) {
+      return false;
+    }
+    seen.add(node.id);
+    return true;
+  });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+function removeUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  ) as T;
 }
 
 function optionalNumber(args: Record<string, unknown>, key: string): number | null {

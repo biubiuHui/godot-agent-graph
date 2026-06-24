@@ -153,6 +153,7 @@ After restart, ask the Agent to list or inspect MCP tools. It should expose:
 - Prefer exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
 - For `.tres` resources, include path fragments and exported/resource property names or string values.
 - Use `godot_node` to read one indexed file, symbol, or graph node.
+- Prefer `godot_node({ file, symbol })` by expanding `context.paths[pN]` and using the node `name` or `qname`.
 - Treat truncated graph output as navigation, not exhaustive proof.
 - For constants, enums, signal names, resource paths, or string protocols, add a focused `rg` or test check when complete reference proof matters.
 

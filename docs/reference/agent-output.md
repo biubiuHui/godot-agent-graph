@@ -62,13 +62,15 @@ The default MCP tools are intentionally small:
   "nodes": [
     {
       "id": "n1",
-      "graphId": "script:res://scripts/ui/fixture_actor.gd",
       "kind": "script_class",
       "name": "FixtureActor",
       "path": "p1",
       "line": 2
     }
   ],
+  "selectors": {
+    "n2": { "kind": "scene_node", "path": "p2", "suffix": "Main/FixtureActor" }
+  },
   "relationships": [],
   "snippets": [
     { "path": "p1", "start": 2, "end": 18, "text": "..." }
@@ -81,7 +83,7 @@ The default MCP tools are intentionally small:
 
 `paths` stores each returned Godot path once. Nodes, snippets, blast-radius check files, and scene summaries refer back to these short ids. When several paths share a long directory prefix, `prefixes` can replace that shared prefix with an alias such as `@p1`.
 
-`id` is a response-local compact node id. `graphId` is the stable indexed graph id and can be passed to `godot_node`.
+`id` is a response-local compact node id. For follow-up source reads, expand the node `path` through `paths[pN]` and call `godot_node` with `file` plus `symbol` from the node `name` or `qname`. `selectors` appears only for nodes that cannot be identified cleanly by `file + symbol`; when needed, rebuild the raw graph id from the selector parts or use its explicit `id`.
 
 ## Relationship Format
 
@@ -91,7 +93,7 @@ Relationships are structured objects rather than repeated prose strings:
 { "from": "n1", "kind": "calls", "to": "n2", "provenance": "resolver" }
 ```
 
-When either side of an edge is outside the visible node set, the formatter keeps the graph id in `graphFrom` or `graphTo`. Unresolved references keep `target` so agents can see what name was not resolved.
+When either side of an edge is outside the visible node set, the formatter still uses a compact local node id and adds a compact `selectors[nN]` entry when a graph-id selector is needed. It does not return raw `graphFrom` or `graphTo` ids by default. Unresolved references keep `target` for plain names; unresolved resource paths use `targetPath` so the long `res://...` value stays in `paths`.
 
 `references_symbol` means a source node names or reads a target symbol. It is separate from `calls` and should not be treated as executable flow.
 
@@ -119,7 +121,27 @@ Resource nodes include `.tres` property metadata. For resource-heavy tasks, quer
 
 File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source. Relationship notes are bounded; use `notes.omitted` to tell whether more relationships exist outside the response.
 
+`godot_node` output also uses compact paths and node ids:
+
+```json
+{
+  "paths": { "p1": "res://scripts/fixture_actor.gd" },
+  "target": { "id": "n1", "kind": "script_class", "name": "FixtureActor", "path": "p1", "line": 2 },
+  "source": { "path": "p1", "start": 2, "end": 24, "text": "..." },
+  "notes": {
+    "callers": [{ "id": "n2", "kind": "method", "name": "_ready", "path": "p1" }],
+    "callees": [],
+    "dependents": [],
+    "dependencies": [],
+    "limit": 8,
+    "omitted": { "callers": 0, "callees": 0, "dependents": 0, "dependencies": 0 }
+  }
+}
+```
+
 For constants, enums, signal names, resource paths, or string protocols, graph navigation should be followed by a narrow `rg` or test check when complete reference proof matters.
+
+When `target` or `symbols[]` already expands a node, relationship notes may return only `{ "id": "nN" }` for that same node. Resolve the id against the already-expanded target or symbol entry instead of expecting the summary to be repeated.
 
 ## Missing Index Recovery
 
@@ -139,9 +161,9 @@ When a payload exceeds its budget, lower-priority snippets are dropped first, th
 
 ## Freshness Contract
 
-Graph-backed answers include freshness metadata. If a selected indexed file has pending watcher or sync work, responses add `stale: true` and `staleFiles`. Agents should either run `godot_sync` or inspect only the named stale files before treating that response as final.
+Graph-backed answers include flat freshness metadata. `godot_context`, `godot_node`, and `godot_sync` return `indexFresh`, `pendingFileCount`, `watcher`, `lastSyncAt`, and `lastSyncAtSource`; they do not repeat a nested `freshness` object. If a selected indexed file has pending watcher or sync work, graph query responses add `stale: true`, `staleFileCount`, compact `staleFiles` path refs when mappable, and `staleFilesOmitted` when pending files are outside the current `paths` table. Use `godot_status` when the full structured `pendingFiles` list is needed.
 
-`godot_sync` returns graph-index delta counts. `addedCount`, `modifiedCount`, and `deletedCount` describe indexed Godot files, not Git status. Path lists are omitted by default to keep agent output compact.
+`godot_sync` returns graph-index delta counts. `addedCount`, `modifiedCount`, and `deletedCount` describe indexed Godot files, not Git status. Path lists and local database paths are omitted by default to keep agent output compact.
 
 ## Privacy And Fixture Rules
 

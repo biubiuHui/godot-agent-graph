@@ -31,6 +31,10 @@ function parseTextContent(result: { content: Array<{ type: string; text?: string
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
+  return result.content.find((item) => item.type === "text")?.text ?? "";
+}
+
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
@@ -76,9 +80,12 @@ describe("realistic Godot MCP knowledge graph tools", () => {
       expect.objectContaining({
         ok: true,
         context: expect.objectContaining({
+          paths: expect.objectContaining({
+            p1: "res://scripts/actors/fixture_actor.gd",
+          }),
           nodes: expect.arrayContaining([
-            expect.objectContaining({ graphId: "script:res://scripts/actors/fixture_actor.gd" }),
-            expect.objectContaining({ graphId: "scene_node:res://scenes/fixture_actor.tscn:FixtureActor" }),
+            expect.objectContaining({ kind: "script_class", path: "p1" }),
+            expect.objectContaining({ kind: "scene_node", path: expect.any(String) }),
           ]),
           relationships: expect.arrayContaining([
             expect.objectContaining({ kind: "attaches_script" }),
@@ -89,32 +96,37 @@ describe("realistic Godot MCP knowledge graph tools", () => {
         ]),
       }),
     );
+    expect(JSON.stringify(context.context)).not.toContain("graphId");
 
-    expect(
-      parseTextContent(
-        callGodotMcpTool("godot_node", {
-          projectPath: root,
-          symbol: "advance_night",
-          file: "res://scripts/autoload/fixture_state.gd",
-          includeCode: false,
-        }),
-      ),
-    ).toEqual(
+    const nodeRead = callGodotMcpTool("godot_node", {
+      projectPath: root,
+      symbol: "advance_night",
+      file: "res://scripts/autoload/fixture_state.gd",
+      includeCode: false,
+    });
+    const nodeText = textContent(nodeRead);
+    const nodePayload = parseTextContent(nodeRead);
+    const nodePaths = nodePayload.paths as Record<string, string>;
+    expect(Object.values(nodePaths).some((path) => path.includes("fixture_state.gd"))).toBe(true);
+    expect(nodePayload).toEqual(
       expect.objectContaining({
         ok: true,
         target: expect.objectContaining({
-          id: "method:res://scripts/autoload/fixture_state.gd:advance_night",
+          id: expect.stringMatching(/^n\d+$/),
           kind: "method",
-          filePath: "res://scripts/autoload/fixture_state.gd",
+          path: "p1",
         }),
         notes: expect.objectContaining({
           callers: expect.arrayContaining([
             expect.objectContaining({
-              id: "method:res://scripts/controllers/main_controller.gd:_ready",
+              id: expect.stringMatching(/^n\d+$/),
+              path: expect.any(String),
             }),
           ]),
         }),
       }),
     );
+    expect(nodeText).not.toContain("filePath");
+    expect(nodeText).not.toContain("graphId");
   });
 });

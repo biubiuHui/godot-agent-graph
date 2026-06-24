@@ -88,6 +88,7 @@ For Codex, install also manages a short project `AGENTS.md` block:
 
 - For Godot scripts, scenes, resources, signals, node paths, or call chains, use the `godot-graph-navigation` skill when available.
 - If the skill is unavailable, call `godot_context` before broad file search, then use `godot_node` for indexed source reads.
+- Prefer `godot_node({ file, symbol })` by expanding `context.paths[pN]` and using the node `name` or `qname`.
 - If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 <!-- godot-agent-graph:end codex-instructions -->
 ```

@@ -52,7 +52,6 @@ describe("agent output formatter", () => {
         nodes: [
           expect.objectContaining({
             id: "n1",
-            graphId: "script:res://scripts/ui/panels/target_panel.gd",
             kind: "script_class",
             name: "TargetPanel",
             path: "p1",
@@ -60,7 +59,6 @@ describe("agent output formatter", () => {
           }),
           expect.objectContaining({
             id: "n2",
-            graphId: "method:res://scripts/ui/panels/target_panel.gd:refresh",
             path: "p1",
             line: 8,
           }),
@@ -97,8 +95,78 @@ describe("agent output formatter", () => {
     const serialized = JSON.stringify(output);
     const newPathOccurrences =
       serialized.match(/res:\/\/scripts\/ui\/panels\/target_panel\.gd/g)?.length ?? 0;
+    expect(serialized).not.toContain("graphId");
     expect(newPathOccurrences).toBeLessThan(oldPathOccurrences);
+    expect(newPathOccurrences).toBe(1);
     expect(serialized).not.toContain("projectRoot");
+  });
+
+  it("omits qname when it only repeats a resource path", () => {
+    const output = formatAgentContext({
+      query: "FixtureStats",
+      nodes: [
+        {
+          id: "resource:res://resources/fixture_stats.tres",
+          kind: "resource",
+          name: "fixture_stats.tres",
+          qualifiedName: "res://resources/fixture_stats.tres",
+          filePath: "res://resources/fixture_stats.tres",
+          startLine: 1,
+          signature: null,
+        },
+      ],
+      relationships: [],
+      files: ["res://resources/fixture_stats.tres"],
+      snippets: [],
+    });
+
+    expect(output.nodes).toEqual([
+      {
+        id: "n1",
+        kind: "resource",
+        name: "fixture_stats.tres",
+        path: "p1",
+        line: 1,
+      },
+    ]);
+    expect(JSON.stringify(output).match(/res:\/\/resources\/fixture_stats\.tres/g)?.length).toBe(1);
+  });
+
+  it("uses compact selectors for graph-id-only context targets", () => {
+    const output = formatAgentContext({
+      query: "FixtureActor scene node",
+      nodes: [
+        {
+          id: "scene_node:res://scenes/fixture_main.tscn:Main/FixtureActor",
+          kind: "scene_node",
+          name: "FixtureActor",
+          qualifiedName: "res://scenes/fixture_main.tscn:Main/FixtureActor",
+          filePath: "res://scenes/fixture_main.tscn",
+          startLine: 7,
+          signature: "CharacterBody2D",
+        },
+      ],
+      relationships: [],
+      files: ["res://scenes/fixture_main.tscn"],
+      snippets: [],
+    });
+
+    expect(output.nodes[0]).toEqual({
+      id: "n1",
+      kind: "scene_node",
+      name: "FixtureActor",
+      path: "p1",
+      line: 7,
+      signature: "CharacterBody2D",
+    });
+    expect(output.selectors).toEqual({
+      n1: {
+        kind: "scene_node",
+        path: "p1",
+        suffix: "Main/FixtureActor",
+      },
+    });
+    expect(JSON.stringify(output).match(/res:\/\/scenes\/fixture_main\.tscn/g)?.length).toBe(1);
   });
 
   it("uses prefix aliases for repeated deep directory paths", () => {
@@ -184,7 +252,7 @@ describe("agent output formatter", () => {
     expect(output.budget.estimatedChars).toBeLessThanOrEqual(400);
   });
 
-  it("does not emit compact relationship ids for omitted nodes", () => {
+  it("uses compact selectors for relationship endpoints outside visible nodes", () => {
     const output = formatAgentContext(
       {
         query: "OmittedNode",
@@ -225,14 +293,66 @@ describe("agent output formatter", () => {
     expect(output.nodes).toHaveLength(1);
     expect(output.nodes[0].id).toBe("n1");
     expect(output.omitted.nodes).toBe(1);
+    expect(output.prefixes).toEqual({
+      "@p1": "res://scripts/",
+    });
+    expect(output.paths).toEqual({
+      p1: "@p1/visible.gd",
+      p2: "@p1/omitted.gd",
+    });
+    expect(output.selectors).toEqual({
+      n2: {
+        kind: "script",
+        path: "p2",
+      },
+    });
     expect(output.relationships).toEqual([
       {
         from: "n1",
         kind: "calls",
-        graphTo: "script:res://scripts/omitted.gd",
+        to: "n2",
         provenance: "resolver",
       },
     ]);
+    expect(JSON.stringify(output)).not.toContain("graphTo");
+    expect(JSON.stringify(output)).not.toContain("graphFrom");
+    expect(JSON.stringify(output)).not.toContain("script:res://scripts/omitted.gd");
+  });
+
+  it("uses path refs for unresolved resource path targets", () => {
+    const output = formatAgentContext({
+      query: "SampleResource",
+      nodes: [
+        {
+          id: "method:res://scripts/sample_loader.gd:_ready",
+          kind: "method",
+          name: "_ready",
+          qualifiedName: "SampleLoader._ready",
+          filePath: "res://scripts/sample_loader.gd",
+          startLine: 5,
+          signature: "func _ready() -> void:",
+        },
+      ],
+      relationships: [
+        "method:res://scripts/sample_loader.gd:_ready loads_resource res://resources/sample_profile.tres (unresolved)",
+      ],
+      files: ["res://scripts/sample_loader.gd"],
+      snippets: [],
+    });
+
+    expect(output.paths).toEqual({
+      p1: "res://scripts/sample_loader.gd",
+      p2: "res://resources/sample_profile.tres",
+    });
+    expect(output.relationships).toEqual([
+      {
+        from: "n1",
+        kind: "loads_resource",
+        targetPath: "p2",
+        provenance: "unresolved",
+      },
+    ]);
+    expect(JSON.stringify(output.relationships)).not.toContain("res://resources/sample_profile.tres");
   });
 
   it("preserves focused relationships before lower-value nodes when truncated", () => {

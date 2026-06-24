@@ -27,10 +27,11 @@ Use `--rebuild` to remove the existing `.gdgraph` directory before syncing. This
 
 The result includes `addedCount`, `modifiedCount`, `deletedCount`, `changeListsOmitted: true`, and `changeScope: "graph_index"`. Full path lists are omitted to keep CLI and agent output compact.
 
-`parseErrors` are gdgraph parser/extractor errors only. Sync output includes:
+`parseErrors` are gdgraph parser/extractor errors only. Sync output includes `parseErrorCount`, at most the first 10 parse error strings, and `parseErrorsOmitted` when more errors exist:
 
 ```json
 {
+  "parseErrorCount": 0,
   "parseErrorScope": "gdgraph_static_parse",
   "compilerChecked": false
 }
@@ -44,7 +45,7 @@ Godot compiler/editor import validation still requires running Godot or project 
 gdgraph status [path]
 ```
 
-Shows initialization state, graph database path, file/node/edge counts, project metadata, and freshness metadata.
+Shows initialization state, file/node/edge counts, index emptiness, and freshness metadata. It omits local graph database paths and project metadata so CLI output remains safe to paste into agent context.
 
 If `initialized:false` or `indexEmpty:true`, run `gdgraph sync [path]` before graph queries.
 

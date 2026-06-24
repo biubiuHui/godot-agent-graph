@@ -28,6 +28,7 @@ export interface AgentFormattedContext {
   pathsBetween: AgentFormattedRelationship[];
   blastRadius?: AgentFormattedBlastRadius;
   nodes: AgentFormattedNode[];
+  selectors?: Record<string, AgentFormattedSelector>;
   relationships: AgentFormattedRelationship[];
   snippets: AgentFormattedSnippet[];
   truncated: boolean;
@@ -44,7 +45,6 @@ export interface AgentFormattedContext {
 
 export interface AgentFormattedNode {
   id: string;
-  graphId: string;
   kind: string;
   name: string;
   qname?: string;
@@ -53,13 +53,19 @@ export interface AgentFormattedNode {
   signature?: string;
 }
 
+export interface AgentFormattedSelector {
+  id?: string;
+  kind?: string;
+  path?: string;
+  suffix?: string;
+}
+
 export interface AgentFormattedRelationship {
   from?: string;
-  graphFrom?: string;
   kind: string;
   to?: string;
-  graphTo?: string;
   target?: string;
+  targetPath?: string;
   provenance: string;
 }
 
@@ -100,12 +106,20 @@ export function formatAgentContext(
     maxChars: options.maxChars ?? DEFAULT_MAX_CHARS,
   };
 
-  const pathTable = createPathTable(context);
+  const parsedRelationships = [
+    ...context.relationships,
+    ...(context.pathsBetween ?? []),
+  ].map(parseRelationship).filter((relationship): relationship is ParsedRelationship => relationship !== null);
+  const pathTable = createPathTable(context, parsedRelationships);
   const visibleNodes = context.nodes.slice(0, limits.maxNodes);
-  const nodeIntern = createNodeIntern(visibleNodes);
+  const nodeIntern = createNodeIntern([
+    ...visibleNodes.map((node) => node.id),
+    ...relationshipEndpointIds(parsedRelationships),
+  ]);
   const allNodes = visibleNodes.map((node) => formatNode(node, pathTable, nodeIntern));
+  const selectors = formatSelectors(visibleNodes, parsedRelationships, pathTable, nodeIntern);
   const allRelationships = context.relationships.map((relationship) =>
-    formatRelationship(relationship, nodeIntern),
+    formatRelationship(relationship, nodeIntern, pathTable),
   );
   const allSnippets = context.snippets
     .filter((snippet) => snippet.filePath in pathTable.pathToRef)
@@ -124,12 +138,13 @@ export function formatAgentContext(
       .map((id) => nodeIntern.idToRef[id])
       .filter((id): id is string => Boolean(id)),
     pathsBetween: (context.pathsBetween ?? []).map((relationship) =>
-      formatRelationship(relationship, nodeIntern),
+      formatRelationship(relationship, nodeIntern, pathTable),
     ),
     ...(context.blastRadius
       ? { blastRadius: formatBlastRadius(context.blastRadius, pathTable, nodeIntern) }
       : {}),
     nodes: allNodes,
+    ...(Object.keys(selectors).length > 0 ? { selectors } : {}),
     relationships: allRelationships.slice(0, limits.maxRelationships),
     snippets: allSnippets.slice(0, limits.maxSnippets),
     truncated: false,
@@ -164,11 +179,12 @@ function formatBlastRadius(
   };
 }
 
-function createPathTable(context: AgentContextInput): AgentPathRefs {
+function createPathTable(context: AgentContextInput, relationships: ParsedRelationship[]): AgentPathRefs {
   const rawPaths = uniqueStrings([
     ...context.files,
     ...context.nodes.flatMap((node) => (node.filePath ? [node.filePath] : [])),
     ...context.snippets.map((snippet) => snippet.filePath),
+    ...relationships.flatMap(relationshipPaths),
   ]);
   return createAgentPathRefs(rawPaths);
 }
@@ -192,12 +208,12 @@ export function createAgentPathRefs(rawPaths: string[]): AgentPathRefs {
   return { paths, pathToRef, prefixes };
 }
 
-function createNodeIntern(nodes: AgentNodeSummary[]): {
+function createNodeIntern(nodeIds: string[]): {
   idToRef: Record<string, string>;
 } {
   const idToRef: Record<string, string> = {};
-  nodes.forEach((node, index) => {
-    idToRef[node.id] = `n${index + 1}`;
+  uniqueStrings(nodeIds).forEach((id, index) => {
+    idToRef[id] = `n${index + 1}`;
   });
   return { idToRef };
 }
@@ -209,19 +225,112 @@ function formatNode(
 ): AgentFormattedNode {
   return removeUndefined({
     id: nodeIntern.idToRef[node.id],
-    graphId: node.id,
     kind: node.kind,
     name: node.name,
-    qname: node.qualifiedName && node.qualifiedName !== node.name ? node.qualifiedName : undefined,
+    qname: displayQualifiedName(node),
     path: node.filePath ? pathTable.pathToRef[node.filePath] : undefined,
     line: node.startLine ?? undefined,
     signature: node.signature ?? undefined,
   });
 }
 
+function displayQualifiedName(node: AgentNodeSummary): string | undefined {
+  if (!node.qualifiedName || node.qualifiedName === node.name) {
+    return undefined;
+  }
+  if (node.qualifiedName.startsWith("res://")) {
+    return undefined;
+  }
+  return node.qualifiedName;
+}
+
+function formatSelectors(
+  nodes: AgentNodeSummary[],
+  relationships: ParsedRelationship[],
+  pathTable: { pathToRef: Record<string, string> },
+  nodeIntern: { idToRef: Record<string, string> },
+): Record<string, AgentFormattedSelector> {
+  const selectors: Record<string, AgentFormattedSelector> = {};
+  const visibleNodeIds = new Set(nodes.map((node) => node.id));
+  for (const node of nodes) {
+    const ref = nodeIntern.idToRef[node.id];
+    if (ref && needsGraphIdSelector(node)) {
+      selectors[ref] = formatSelector(node, pathTable);
+    }
+  }
+  for (const endpointId of relationshipEndpointIds(relationships)) {
+    if (visibleNodeIds.has(endpointId)) {
+      continue;
+    }
+    const ref = nodeIntern.idToRef[endpointId];
+    const selector = formatGraphIdSelector(endpointId, pathTable);
+    if (ref && selector) {
+      selectors[ref] = selector;
+    }
+  }
+  return selectors;
+}
+
+function formatSelector(
+  node: AgentNodeSummary,
+  pathTable: { pathToRef: Record<string, string> },
+): AgentFormattedSelector {
+  if (node.filePath) {
+    const path = pathTable.pathToRef[node.filePath];
+    const idPrefix = `${node.kind}:${node.filePath}:`;
+    if (path && node.id.startsWith(idPrefix)) {
+      return {
+        kind: node.kind,
+        path,
+        suffix: node.id.slice(idPrefix.length),
+      };
+    }
+
+    const exactPathId = `${node.kind}:${node.filePath}`;
+    if (path && node.id === exactPathId) {
+      return {
+        kind: node.kind,
+        path,
+      };
+    }
+  }
+
+  return { id: node.id };
+}
+
+function formatGraphIdSelector(
+  id: string,
+  pathTable: { pathToRef: Record<string, string> },
+): AgentFormattedSelector | null {
+  const parts = graphIdParts(id);
+  if (!parts) {
+    return { id };
+  }
+
+  const path = pathTable.pathToRef[parts.path];
+  if (!path) {
+    return { id };
+  }
+
+  return removeUndefined({
+    kind: parts.kind,
+    path,
+    suffix: parts.suffix,
+  });
+}
+
+function needsGraphIdSelector(node: AgentNodeSummary): boolean {
+  return node.kind === "scene_node" ||
+    node.kind === "autoload" ||
+    node.kind === "input_action" ||
+    node.kind === "project" ||
+    !node.filePath;
+}
+
 function formatRelationship(
   relationship: string,
   nodeIntern: { idToRef: Record<string, string> },
+  pathTable?: { pathToRef: Record<string, string> },
 ): AgentFormattedRelationship {
   const parsed = parseRelationship(relationship);
   if (!parsed) {
@@ -234,20 +343,27 @@ function formatRelationship(
 
   const fromRef = nodeIntern.idToRef[parsed.source];
   const toRef = nodeIntern.idToRef[parsed.target];
+  const targetPath = parsed.provenance === "unresolved" && parsed.target.startsWith("res://")
+    ? pathTable?.pathToRef[parsed.target]
+    : undefined;
   return removeUndefined({
     from: fromRef,
-    graphFrom: fromRef ? undefined : parsed.source,
     kind: parsed.kind,
     to: toRef,
-    graphTo: toRef || parsed.provenance === "unresolved" ? undefined : parsed.target,
-    target: toRef || parsed.provenance !== "unresolved" ? undefined : parsed.target,
+    targetPath,
+    target: toRef || targetPath || parsed.provenance !== "unresolved" ? undefined : parsed.target,
     provenance: parsed.provenance,
   });
 }
 
-function parseRelationship(
-  relationship: string,
-): { source: string; kind: string; target: string; provenance: string } | null {
+interface ParsedRelationship {
+  source: string;
+  kind: string;
+  target: string;
+  provenance: string;
+}
+
+function parseRelationship(relationship: string): ParsedRelationship | null {
   const match = relationship.match(/^(\S+) ([a-z_]+) (.+) \(([^)]+)\)$/);
   if (!match) {
     return null;
@@ -259,6 +375,43 @@ function parseRelationship(
     target: match[3],
     provenance: match[4],
   };
+}
+
+function relationshipEndpointIds(relationships: ParsedRelationship[]): string[] {
+  return relationships.flatMap((relationship) => [
+    ...(isGraphId(relationship.source) ? [relationship.source] : []),
+    ...(isGraphId(relationship.target) ? [relationship.target] : []),
+  ]);
+}
+
+function relationshipPaths(relationship: ParsedRelationship): string[] {
+  return [
+    graphIdParts(relationship.source)?.path,
+    graphIdParts(relationship.target)?.path,
+    relationship.target.startsWith("res://") ? relationship.target : null,
+  ].filter((path): path is string => Boolean(path));
+}
+
+function isGraphId(value: string): boolean {
+  return graphIdParts(value) !== null;
+}
+
+function graphIdParts(id: string): { kind: string; path: string; suffix?: string } | null {
+  const firstColon = id.indexOf(":");
+  if (firstColon <= 0) {
+    return null;
+  }
+
+  const kind = id.slice(0, firstColon);
+  const rest = id.slice(firstColon + 1);
+  if (!rest.startsWith("res://")) {
+    return null;
+  }
+
+  const suffixSeparator = rest.indexOf(":", "res://".length);
+  const path = suffixSeparator >= 0 ? rest.slice(0, suffixSeparator) : rest;
+  const suffix = suffixSeparator >= 0 ? rest.slice(suffixSeparator + 1) : undefined;
+  return removeUndefined({ kind, path, suffix });
 }
 
 function applyCharacterBudget(output: AgentFormattedContext, maxChars: number): void {
@@ -305,6 +458,12 @@ function removeUnreferencedTailNode(output: AgentFormattedContext): boolean {
       continue;
     }
 
+    if (output.selectors) {
+      delete output.selectors[node.id];
+      if (Object.keys(output.selectors).length === 0) {
+        delete output.selectors;
+      }
+    }
     output.nodes.splice(index, 1);
     return true;
   }

@@ -29,6 +29,15 @@ async function runCli(args: string[]) {
   return JSON.parse(output.join("")) as Record<string, unknown>;
 }
 
+function expectNoLocalPathFields(payload: Record<string, unknown>, root: string): void {
+  const text = JSON.stringify(payload);
+  expect(payload).not.toHaveProperty("projectRoot");
+  expect(payload).not.toHaveProperty("dbPath");
+  expect(payload).not.toHaveProperty("databasePath");
+  expect(payload).not.toHaveProperty("graphDir");
+  expect(text).not.toContain(root);
+}
+
 async function expectUnknownCommand(commandName: string): Promise<void> {
   const program = createCliProgram({
     version: "1.2.3",
@@ -94,28 +103,33 @@ describe("gdgraph CLI commands", () => {
   it("syncs a fresh project and reports status", async () => {
     const root = copyFixture("minimal");
 
-    expect(await runCli(["sync", root])).toEqual(
+    const sync = await runCli(["sync", root]);
+    expect(sync).toEqual(
       expect.objectContaining({
         ok: true,
         fileCount: 3,
         addedCount: 3,
         modifiedCount: 0,
         deletedCount: 0,
+        parseErrorCount: 0,
         parseErrorScope: "gdgraph_static_parse",
         compilerChecked: false,
         changeListsOmitted: true,
       }),
     );
+    expectNoLocalPathFields(sync, root);
 
-    expect(await runCli(["status", root])).toEqual(
+    const status = await runCli(["status", root]);
+    expect(status).toEqual(
       expect.objectContaining({
         initialized: true,
         fileCount: 3,
-        project: expect.objectContaining({
-          name: "MinimalFixture",
-        }),
+        pendingFileCount: 0,
       }),
     );
+    expect(status).not.toHaveProperty("project");
+    expect(status).not.toHaveProperty("freshness");
+    expectNoLocalPathFields(status, root);
   });
 
   it("returns context packages through the final context command", async () => {
@@ -129,11 +143,13 @@ describe("gdgraph CLI commands", () => {
         ok: true,
         query: "FixtureActor",
         indexFresh: true,
+        pendingFileCount: 0,
         context: expect.objectContaining({
           nodes: expect.arrayContaining([
             expect.objectContaining({
-              graphId: "script:res://scripts/fixture_actor.gd",
+              id: expect.stringMatching(/^n\d+$/),
               kind: "script_class",
+              path: "p1",
             }),
           ]),
           snippets: expect.arrayContaining([
@@ -144,6 +160,9 @@ describe("gdgraph CLI commands", () => {
         }),
       }),
     );
+    expect(context).not.toHaveProperty("project");
+    expect(context).not.toHaveProperty("freshness");
+    expectNoLocalPathFields(context, root);
   });
 
   it("reads indexed source through the final node command", async () => {
@@ -155,8 +174,11 @@ describe("gdgraph CLI commands", () => {
     ).toEqual(
       expect.objectContaining({
         ok: true,
+        paths: expect.objectContaining({
+          p1: "res://scripts/fixture_actor.gd",
+        }),
         source: expect.objectContaining({
-          filePath: "res://scripts/fixture_actor.gd",
+          path: "p1",
           text: expect.stringContaining("class_name FixtureActor"),
         }),
       }),
@@ -168,7 +190,8 @@ describe("gdgraph CLI commands", () => {
         ok: true,
         target: expect.objectContaining({
           kind: "script_class",
-          id: "script:res://scripts/fixture_actor.gd",
+          id: expect.stringMatching(/^n\d+$/),
+          path: "p1",
         }),
       }),
     );
@@ -186,7 +209,7 @@ describe("gdgraph CLI commands", () => {
       expect.objectContaining({
         ok: true,
         symbols: expect.arrayContaining([
-          expect.objectContaining({ kind: "method" }),
+          expect.objectContaining({ kind: "method", path: "p1" }),
         ]),
       }),
     );
@@ -198,12 +221,12 @@ describe("gdgraph CLI commands", () => {
     await runCli(["sync", root]);
     expect(existsSync(join(root, ".gdgraph", "graph.db"))).toBe(true);
 
-    expect(await runCli(["clean", root])).toEqual({
+    const clean = await runCli(["clean", root]);
+    expect(clean).toEqual({
       ok: true,
-      projectRoot: root,
-      graphDir: join(root, ".gdgraph"),
       removed: true,
     });
+    expectNoLocalPathFields(clean, root);
     expect(existsSync(join(root, ".gdgraph"))).toBe(false);
   });
 
@@ -222,10 +245,12 @@ describe("gdgraph CLI commands", () => {
         addedCount: 3,
         modifiedCount: 0,
         deletedCount: 0,
+        parseErrorCount: 0,
         changeListsOmitted: true,
         message: expect.stringContaining("Rebuilt graph index from scratch"),
       }),
     );
+    expectNoLocalPathFields(rebuild, root);
     expect(rebuild).not.toHaveProperty("added");
     expect(rebuild).not.toHaveProperty("modified");
     expect(rebuild).not.toHaveProperty("deleted");
@@ -249,10 +274,12 @@ describe("gdgraph CLI commands", () => {
         addedCount: 1,
         modifiedCount: 0,
         deletedCount: 0,
+        parseErrorCount: 0,
         changeListsOmitted: true,
         message: expect.stringContaining("Synchronized graph index"),
       }),
     );
+    expectNoLocalPathFields(sync, root);
     expect(sync).not.toHaveProperty("added");
     expect(sync).not.toHaveProperty("modified");
     expect(sync).not.toHaveProperty("deleted");
@@ -262,7 +289,11 @@ describe("gdgraph CLI commands", () => {
         ok: true,
         context: expect.objectContaining({
           nodes: expect.arrayContaining([
-            expect.objectContaining({ graphId: "script:res://scripts/sync_added.gd" }),
+            expect.objectContaining({
+              kind: "script_class",
+              name: "SyncAdded",
+              path: "p1",
+            }),
           ]),
         }),
       }),
@@ -293,12 +324,13 @@ describe("gdgraph CLI commands", () => {
     const root = mkdtempSync(join(tmpdir(), "gdgraph-cli-empty-"));
     tempRoots.push(root);
 
-    expect(await runCli(["sync", root])).toEqual({
+    const response = await runCli(["sync", root]);
+    expect(response).toEqual({
       ok: false,
-      projectRoot: root,
       reason: "missing_project_godot",
-      message: `No project.godot found in ${root}`,
+      message: "No project.godot found.",
     });
+    expectNoLocalPathFields(response, root);
   });
 
   it("does not clean storage on sync --rebuild when the path is not a Godot project", async () => {
@@ -308,13 +340,14 @@ describe("gdgraph CLI commands", () => {
     mkdirSync(join(root, ".gdgraph"));
     writeFileSync(sentinelPath, "keep me\n");
 
-    expect(await runCli(["sync", root, "--rebuild"])).toEqual({
+    const response = await runCli(["sync", root, "--rebuild"]);
+    expect(response).toEqual({
       ok: false,
-      projectRoot: root,
       reason: "missing_project_godot",
-      message: `No project.godot found in ${root}`,
+      message: "No project.godot found.",
       rebuilt: false,
     });
+    expectNoLocalPathFields(response, root);
     expect(existsSync(sentinelPath)).toBe(true);
   });
 

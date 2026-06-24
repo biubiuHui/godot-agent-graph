@@ -14,8 +14,12 @@ import {
 } from "../installer/index.js";
 import { serveGodotMcp, type ServeGodotMcpOptions } from "../mcp/server.js";
 import { detectGodotProject } from "../project.js";
-import { attachFreshness, getScanAwareGraphFreshness } from "../sync/freshness.js";
-import { syncGodotProject, type SyncGodotProjectOk } from "../sync/index.js";
+import {
+  attachGraphQueryFreshness,
+  attachStatusFreshness,
+  getScanAwareGraphFreshness,
+} from "../sync/freshness.js";
+import { syncGodotProject, type SyncGodotProjectError, type SyncGodotProjectOk } from "../sync/index.js";
 
 const SYNC_MESSAGE =
   "Synchronized graph index. Counts describe graph index changes, not Git status. Path lists are omitted to keep output compact.";
@@ -68,9 +72,8 @@ export function createCliProgram(options: CliProgramOptions): Command {
         if (!detected.ok) {
           writeJson(write, {
             ok: false,
-            projectRoot: detected.root,
             reason: detected.reason,
-            message: detected.message,
+            message: "No project.godot found.",
             rebuilt: false,
           });
           return;
@@ -80,7 +83,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
 
       const result = syncGodotProject(root);
       if (!result.ok) {
-        writeJson(write, rebuild ? { ...result, rebuilt: false } : result);
+        writeJson(write, compactCliSyncErrorPayload(result, rebuild));
         return;
       }
 
@@ -102,12 +105,11 @@ export function createCliProgram(options: CliProgramOptions): Command {
       withGraph(root, (graph) => {
         writeJson(
           write,
-          attachFreshness(
+          attachStatusFreshness(
             {
               ok: true,
               initialized: true,
-              dbPath: graph.databasePath,
-              ...getProjectOverview(graph),
+              ...overviewSummary(graph),
             },
             getScanAwareGraphFreshness(root, graph),
           ),
@@ -130,11 +132,11 @@ export function createCliProgram(options: CliProgramOptions): Command {
           maxFiles: optionalCliNumber(commandOptions.maxFiles) ?? 6,
           includeCode: commandOptions.code ?? false,
         });
-        return attachFreshness(
+        return attachGraphQueryFreshness(
           {
             ok: true,
             query,
-            ...getProjectOverview(graph),
+            ...overviewSummary(graph),
             context: formatAgentContext(context, {
               maxChars: 4_800,
               maxNodes: 40,
@@ -286,8 +288,6 @@ function uninitializedStatus(root: string): Record<string, unknown> | null {
   return {
     ok: false,
     initialized: false,
-    projectRoot: root,
-    dbPath,
     message: "No gdgraph index found. Run gdgraph sync first.",
   };
 }
@@ -301,23 +301,74 @@ function cleanGdgraphStorage(projectRoot: string): Record<string, unknown> {
 
   return {
     ok: true,
-    projectRoot,
-    graphDir,
     removed,
   };
 }
 
 function compactCliSyncPayload(result: SyncGodotProjectOk, rebuilt: boolean): Record<string, unknown> {
-  const { added, modified, deleted, message: _message, ...rest } = result;
-  return {
+  const {
+    added,
+    modified,
+    deleted,
+    projectRoot: _projectRoot,
+    databasePath: _databasePath,
+    message: _message,
+    parseErrors,
+    ...rest
+  } = result;
+  return removeUndefined({
     ...rest,
     ...(rebuilt ? { rebuilt: true } : {}),
     addedCount: added.length,
     modifiedCount: modified.length,
     deletedCount: deleted.length,
+    parseErrorCount: parseErrors.length,
+    parseErrors: parseErrors.length > 0 ? parseErrors.slice(0, 10) : undefined,
+    parseErrorsOmitted: Math.max(0, parseErrors.length - 10) || undefined,
     changeListsOmitted: true,
     message: rebuilt ? REBUILD_SYNC_MESSAGE : SYNC_MESSAGE,
+  });
+}
+
+function compactCliSyncErrorPayload(result: SyncGodotProjectError, rebuilt: boolean): Record<string, unknown> {
+  return removeUndefined({
+    ok: false,
+    reason: result.reason,
+    message: compactCliErrorMessage(result),
+    retryAfterMs: result.retryAfterMs,
+    lockKind: result.lockKind,
+    ...(rebuilt ? { rebuilt: false } : {}),
+  });
+}
+
+function compactCliErrorMessage(result: SyncGodotProjectError): string {
+  if (result.reason === "missing_project_godot") {
+    return "No project.godot found.";
+  }
+  return redactLocalPaths(result.message);
+}
+
+function overviewSummary(graph: ReturnType<typeof createGraphDatabase>): Record<string, unknown> {
+  const overview = getProjectOverview(graph);
+  return {
+    fileCount: overview.fileCount,
+    nodeCount: overview.nodeCount,
+    edgeCount: overview.edgeCount,
+    unresolvedRefCount: overview.unresolvedRefCount,
+    indexEmpty: overview.fileCount === 0 && overview.nodeCount === 0,
   };
+}
+
+function redactLocalPaths(value: string): string {
+  return value
+    .replace(/\/(?:Users|Volumes|private|var|tmp)\/[^\s"'{}[\],)]+/g, "[local-path]")
+    .replace(/[A-Za-z]:\\[^\s"'{}[\],)]+/g, "[local-path]");
+}
+
+function removeUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  ) as T;
 }
 
 function withGraph(root: string, callback: (graph: ReturnType<typeof createGraphDatabase>) => void): void {

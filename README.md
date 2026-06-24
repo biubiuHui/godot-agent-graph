@@ -117,9 +117,9 @@ gdgraph serve --mcp /path/to/godot/project
 推荐顺序：
 
 1. 先用 `godot_context`。
-2. 需要源码时，把返回的 `graphId` 传给 `godot_node`。
+2. 需要源码时，从 `context.paths[pN]` 取文件路径，再用节点的 `name` / `qname` 调用 `godot_node({ file, symbol })`。
 3. 如果 `initialized` 是 `false` 或 `indexEmpty` 是 `true`，先手动调用一次 `godot_sync`，再重试 `godot_context`。
-4. 如果 `indexFresh` 是 `false`，先用 `godot_sync`。
+4. 如果 `indexFresh` 是 `false`，先用 `godot_status` 看完整 pending 文件列表，或直接调用 `godot_sync`。
 
 `godot_context.query` 应写成短关键词/符号查询，不要写成自然语言任务。优先使用准确类名、方法名、常量名、字段名、资源路径、文件/路径片段和领域名词。
 
@@ -192,15 +192,15 @@ flowchart LR
   E --> F["Agent"]
 ```
 
-第一次索引之后，`gdgraph sync` 是增量同步：它更新变化过的 Godot 文件、移除已删除文件的图谱记录，并重新计算 resolver 生成的关系，不会重写未变化的已索引文件。`gdgraph sync --rebuild` 会先删除 `.gdgraph`，再进行一次全量新索引。同步输出只报告变化数量，默认省略路径列表，避免浪费 CLI 和 agent 上下文。
+第一次索引之后，`gdgraph sync` 是增量同步：它更新变化过的 Godot 文件、移除已删除文件的图谱记录，并重新计算 resolver 生成的关系，不会重写未变化的已索引文件。`gdgraph sync --rebuild` 会先删除 `.gdgraph`，再进行一次全量新索引。同步输出只报告变化数量，默认省略路径列表和本地数据库路径，避免浪费 CLI 和 agent 上下文。
 
-`gdgraph serve --mcp` 启动时会尽量先同步索引。MCP server 运行期间，watcher 会记录 Godot 文件变化，并用防抖方式触发同一条增量同步路径。如果 watcher 被禁用或降级，工具响应会返回 stale 或 pending 文件，让 agent 先调用 `godot_sync` 或 `gdgraph sync`，再依赖图谱结果。
+`gdgraph serve --mcp` 启动时会尽量先同步索引。MCP server 运行期间，watcher 会记录 Godot 文件变化，并用防抖方式触发同一条增量同步路径。如果 watcher 被禁用或降级，图谱查询会返回 compact stale 信息；需要完整 pending 文件列表时用 `godot_status`，然后再调用 `godot_sync` 或 `gdgraph sync`。
 
 ## 边界
 
 `gdgraph` 只做静态分析，不运行 Godot 项目。
 
-`parseErrors` 只表示 gdgraph 自己的静态解析/抽取错误。`parseErrorScope: "gdgraph_static_parse"` 和 `compilerChecked: false` 表示尚未经过 Godot 编译器或编辑器导入验证；这仍然需要单独运行 Godot 或项目测试。
+`parseErrors` 只表示 gdgraph 自己的静态解析/抽取错误。同步输出会返回 `parseErrorCount`，最多列出前 10 条 `parseErrors`，并用 `parseErrorsOmitted` 标明省略数量。`parseErrorScope: "gdgraph_static_parse"` 和 `compilerChecked: false` 表示尚未经过 Godot 编译器或编辑器导入验证；这仍然需要单独运行 Godot 或项目测试。
 
 它不会猜运行时动态创建的节点、复杂类型流或字符串拼接路径。无法确认的引用会保留为 unresolved，避免生成错误边。
 

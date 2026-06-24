@@ -72,19 +72,111 @@ export function attachFreshness(
   payload: Record<string, unknown>,
   freshness: GraphFreshness,
 ): Record<string, unknown> {
+  return attachStatusFreshness(payload, freshness);
+}
+
+export function attachStatusFreshness(
+  payload: Record<string, unknown>,
+  freshness: GraphFreshness,
+): Record<string, unknown> {
   const staleFiles = freshness.pendingFiles.map((file) => file.path).sort();
+  const payloadHasStaleFiles = Object.prototype.hasOwnProperty.call(payload, "staleFiles");
   return {
     ...payload,
     ...freshness,
+    pendingFileCount: freshness.pendingFiles.length,
     ...(!freshness.indexFresh
       ? {
           stale: true,
           staleFileCount: staleFiles.length,
-          staleFiles,
+          ...(payloadHasStaleFiles ? {} : { staleFiles }),
         }
       : {}),
-    freshness,
   };
+}
+
+export function attachGraphQueryFreshness(
+  payload: Record<string, unknown>,
+  freshness: GraphFreshness,
+): Record<string, unknown> {
+  const stalePaths = freshness.pendingFiles.map((file) => file.path).sort();
+  const compactStaleFiles = compactStaleFileRefs(payload, stalePaths);
+  return {
+    ...payload,
+    indexFresh: freshness.indexFresh,
+    pendingFileCount: freshness.pendingFiles.length,
+    watcher: freshness.watcher,
+    lastSyncAt: freshness.lastSyncAt,
+    lastSyncAtSource: freshness.lastSyncAtSource,
+    ...(!freshness.indexFresh
+      ? {
+          stale: true,
+          staleFileCount: stalePaths.length,
+          ...(compactStaleFiles.length > 0 ? { staleFiles: compactStaleFiles } : {}),
+          ...(stalePaths.length > compactStaleFiles.length
+            ? { staleFilesOmitted: stalePaths.length - compactStaleFiles.length }
+            : {}),
+        }
+      : {}),
+  };
+}
+
+function compactStaleFileRefs(payload: Record<string, unknown>, stalePaths: string[]): string[] {
+  const pathToRef = payloadPathRefs(payload);
+  return stalePaths
+    .map((path) => pathToRef.get(path))
+    .filter((ref): ref is string => Boolean(ref));
+}
+
+function payloadPathRefs(payload: Record<string, unknown>): Map<string, string> {
+  const refs = new Map<string, string>();
+  collectPathRefs(payload, refs);
+  return refs;
+}
+
+function collectPathRefs(value: unknown, refs: Map<string, string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectPathRefs(item, refs);
+    }
+    return;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  const paths = record.paths;
+  if (typeof paths === "object" && paths !== null && !Array.isArray(paths)) {
+    const prefixes = typeof record.prefixes === "object" && record.prefixes !== null && !Array.isArray(record.prefixes)
+      ? record.prefixes as Record<string, unknown>
+      : {};
+    for (const [ref, path] of Object.entries(paths as Record<string, unknown>)) {
+      if (typeof path === "string") {
+        const expandedPath = expandPathRef(path, prefixes);
+        if (expandedPath.startsWith("res://")) {
+          refs.set(expandedPath, ref);
+        }
+      }
+    }
+  }
+
+  for (const item of Object.values(record)) {
+    collectPathRefs(item, refs);
+  }
+}
+
+function expandPathRef(path: string, prefixes: Record<string, unknown>): string {
+  if (path.startsWith("res://")) {
+    return path;
+  }
+
+  const [prefixRef, ...rest] = path.split("/");
+  const prefix = prefixes[prefixRef];
+  return typeof prefix === "string" && rest.length > 0
+    ? `${prefix}${rest.join("/")}`
+    : path;
 }
 
 function getNumber(value: Record<string, unknown> | undefined, key: string): number | null {

@@ -15,6 +15,8 @@ Use `gdgraph` as the first navigation layer for Godot structure. It is an indexe
 4. Use `godot_node` for indexed source reads by file, symbol, or graph node after `godot_context` identifies a target.
 5. Read files, run `rg`, or run tests only for focused verification that the graph output cannot prove.
 
+`godot_context` and `godot_node` use compact response-local ids. Expand `paths[pN]` to get a Godot file path, then prefer `godot_node({ file, symbol })` with the node `name` or `qname` for follow-up source reads. Use raw graph-node `id` only when the response provides an explicit selector and a file+symbol selector cannot identify the target. Relationship notes that contain only `{ "id": "nN" }` refer to a node already expanded in `target` or `symbols[]`.
+
 If MCP tools are unavailable, use the CLI fallback: `gdgraph sync`, `gdgraph context`, and `gdgraph node`, then read only the files the graph points to.
 
 ## Query Style
@@ -50,6 +52,8 @@ Find enemy spawning systems, wave config, and enemy resources relevant for writi
 ## Verification Boundaries
 
 Treat `godot_context.truncated`, omitted relationships, and `godot_node.notes.omitted` as bounded navigation output, not exhaustive proof.
+
+Graph query responses expose compact freshness fields such as `indexFresh`, `pendingFileCount`, and compact `staleFiles` refs. Use `godot_status` when the full structured `pendingFiles` list is needed.
 
 Use a focused `rg`, direct source read, or test when changing or auditing:
 

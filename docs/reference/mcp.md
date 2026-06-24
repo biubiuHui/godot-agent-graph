@@ -30,27 +30,20 @@ Most graph query responses include:
 ```json
 {
   "indexFresh": true,
-  "pendingFiles": [],
+  "pendingFileCount": 0,
   "watcher": "disabled",
   "lastSyncAt": 1780000000000,
-  "lastSyncAtSource": "sync",
-  "freshness": {
-    "indexFresh": true,
-    "pendingFiles": [],
-    "watcher": "disabled",
-    "lastSyncAt": 1780000000000,
-    "lastSyncAtSource": "sync"
-  }
+  "lastSyncAtSource": "sync"
 }
 ```
 
 When `indexFresh` is false, the graph may not include pending file changes. Call `godot_sync` or inspect the listed files before treating results as final.
 
-Use `indexFresh` and `pendingFiles` as the authoritative freshness signal. `lastSyncAtSource` is diagnostic metadata: `"sync"` means explicit sync metadata, `"index"` means the timestamp fell back to index metadata, and `"unknown"` means an older or manually altered index has no usable timestamp.
+Use `indexFresh` and `pendingFileCount` as the graph-query freshness signal. `lastSyncAtSource` is diagnostic metadata: `"sync"` means explicit sync metadata, `"index"` means the timestamp fell back to index metadata, and `"unknown"` means an older or manually altered index has no usable timestamp.
 
-Stale graph query responses also include `stale: true`, `staleFileCount`, and `staleFiles` as a concise action list. `pendingFiles` remains the structured compatibility field.
+Stale graph query responses also include `stale: true`, `staleFileCount`, compact `staleFiles` path refs when the pending file is present in the response `paths` table, and `staleFilesOmitted` for pending files outside that table.
 
-`godot_status` is intentionally shorter and returns only flat freshness fields, without the nested `freshness` object.
+`godot_status` is the full freshness inspection tool. It returns flat freshness fields plus the structured `pendingFiles` list, without a nested `freshness` object.
 
 ## godot_status
 
@@ -112,7 +105,6 @@ For `.tres` resources, include directory fragments such as `resources/definition
   "nodes": [
     {
       "id": "n1",
-      "graphId": "script:res://scripts/ui/panels/target_panel.gd",
       "kind": "script_class",
       "name": "TargetPanel",
       "path": "p1",
@@ -120,7 +112,6 @@ For `.tres` resources, include directory fragments such as `resources/definition
     },
     {
       "id": "n2",
-      "graphId": "method:res://scripts/ui/panels/target_panel.gd:refresh",
       "kind": "method",
       "name": "refresh",
       "path": "p1",
@@ -130,6 +121,9 @@ For `.tres` resources, include directory fragments such as `resources/definition
   "relationships": [
     { "from": "n1", "kind": "contains", "to": "n2", "provenance": "parser" }
   ],
+  "selectors": {
+    "n3": { "kind": "scene_node", "path": "p2", "suffix": "Main/TargetPanel" }
+  },
   "pathsBetween": [
     { "from": "n1", "kind": "calls", "to": "n2", "provenance": "resolver" }
   ],
@@ -147,7 +141,7 @@ For `.tres` resources, include directory fragments such as `resources/definition
 }
 ```
 
-Use `paths` to expand compact path ids. `entryPoints` are the ranked starting nodes for the query. Exact symbols, file paths, CamelCase terms, and snake_case terms are ranked entry candidates. `pathsBetween` highlights direct graph edges between entry points when found. `blastRadius` appears only for edit/impact-style queries and gives a compact first check-file set, not a full transitive impact report. Use `graphId` with `godot_node` when a specific indexed node needs source. `truncated` and `omitted` tell the agent when the response stayed within budget by dropping lower-priority entries.
+Use `paths` to expand compact path ids. `entryPoints` are the ranked starting nodes for the query. Exact symbols, file paths, CamelCase terms, and snake_case terms are ranked entry candidates. `pathsBetween` highlights direct graph edges between entry points when found. `blastRadius` appears only for edit/impact-style queries and gives a compact first check-file set, not a full transitive impact report. For source follow-up, expand `paths[pN]` and call `godot_node({ file, symbol })` with the node `name` or `qname`. `selectors` appears for graph-id-only targets such as scene nodes and for relationship endpoints outside the visible `nodes[]` list. `truncated` and `omitted` tell the agent when the response stayed within budget by dropping lower-priority entries.
 
 `truncated:true` means the response is a navigation package, not a complete proof chain. For high-risk edits that depend on complete reference coverage, follow up with `godot_node`, a narrow `rg`, or tests.
 
@@ -188,8 +182,11 @@ Responses include concise relationship notes:
 
 ```json
 {
+  "paths": { "p1": "res://scripts/fixture_actor.gd" },
+  "target": { "id": "n1", "kind": "script_class", "name": "FixtureActor", "path": "p1" },
+  "source": { "path": "p1", "start": 2, "end": 24, "text": "..." },
   "notes": {
-    "callers": [{ "id": "method:...", "kind": "method", "name": "_ready" }],
+    "callers": [{ "id": "n2", "kind": "method", "name": "_ready", "path": "p1" }],
     "callees": [],
     "dependents": [],
     "dependencies": [],
@@ -206,7 +203,9 @@ Responses include concise relationship notes:
 
 Relationship notes are bounded summaries. Cross-file `references_symbol` evidence is prioritized ahead of local structural edges, but nonzero `notes.omitted` still means additional relationships exist outside the response. For constants, enums, signal names, resource paths, and string protocols, use a narrow `rg` or tests when exhaustive impact proof matters.
 
-If the selected indexed file is pending watcher/sync processing, the response includes `stale: true` and `staleFiles` alongside the normal freshness fields. This is the graph-native substitute for raw `Read` on indexed Godot files.
+If a relationship note points to a node already expanded in `target` or `symbols[]`, the note may be just `{ "id": "nN" }`. Resolve that id against the expanded target or symbol entry.
+
+If the selected indexed file is pending watcher/sync processing, the response includes `stale: true` and compact `staleFiles` path refs alongside the normal freshness fields. This is the graph-native substitute for raw `Read` on indexed Godot files.
 
 ## godot_sync
 
@@ -220,16 +219,17 @@ Detects added, modified, and deleted Godot files, incrementally updates the grap
 
 After the first index, `godot_sync` parses added and modified files, removes graph records for deleted files, and recomputes resolver-owned relationships from retained reference candidates. Unchanged indexed files are not rewritten by ordinary sync. A watcher, when active, only schedules this same sync path.
 
-`parseErrors` are gdgraph parser/extractor errors only. `godot_sync` does not run the Godot editor, compiler, or importer:
+`parseErrors` are gdgraph parser/extractor errors only. `godot_sync` returns `parseErrorCount`, includes at most the first 10 parse error strings, and adds `parseErrorsOmitted` when more errors exist. It does not run the Godot editor, compiler, or importer:
 
 ```json
 {
+  "parseErrorCount": 0,
   "parseErrorScope": "gdgraph_static_parse",
   "compilerChecked": false
 }
 ```
 
-Path lists are omitted by default to keep agent output compact:
+Path lists and local database paths are omitted by default to keep agent output compact:
 
 ```json
 {

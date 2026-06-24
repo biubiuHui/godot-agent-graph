@@ -2,6 +2,7 @@ export function getMcpInstructions(): string {
   return [
     "Use godot_context as the primary first call for Godot project structure, scripts, scenes, resources, signals, node paths, call-chain questions, and edit planning.",
     "Use godot_node as the graph-native source read for indexed Godot files or named symbols; treat its returned source as already read.",
+    "Context and node payloads use compact local ids: expand context.paths[pN] and prefer godot_node with file plus symbol for follow-up reads.",
     "Use godot_status to check index health and freshness before trusting a stale answer.",
     "Use godot_sync only when indexFresh=false, watcher sync is unavailable, or you need an explicit catch-up before graph answers.",
     "For godot_context.query, use terse identifier-heavy keyword queries made of exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.",

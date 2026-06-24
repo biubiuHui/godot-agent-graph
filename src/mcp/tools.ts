@@ -7,8 +7,11 @@ import { getNodePayload } from "../context/node-payload.js";
 import { isSqliteLockError } from "../db/errors.js";
 import { createGraphDatabase } from "../db/index.js";
 import { getProjectOverview } from "../graph/queries.js";
-import { attachFreshness, getScanAwareGraphFreshness } from "../sync/freshness.js";
-import { syncGodotProject, type SyncGodotProjectOk } from "../sync/index.js";
+import {
+  attachGraphQueryFreshness,
+  getScanAwareGraphFreshness,
+} from "../sync/freshness.js";
+import { syncGodotProject, type SyncGodotProjectError, type SyncGodotProjectOk } from "../sync/index.js";
 import { globalPendingFileTracker } from "../sync/watcher.js";
 import { errorMessage, logMcpError } from "./logging.js";
 
@@ -180,14 +183,14 @@ function callGodotMcpToolUnsafe(
     const projectRoot = projectRootFromArgs(args);
     const result = syncGodotProject(projectRoot);
     if (!result.ok) {
-      return jsonToolResult(result);
+      return jsonToolResult(compactSyncErrorPayload(result));
     }
 
     globalPendingFileTracker.clearPending(projectRoot);
     const graph = createGraphDatabase(projectRoot);
     try {
       return jsonToolResult(
-        attachFreshness(
+        attachGraphQueryFreshness(
           compactSyncPayload(result),
           getScanAwareGraphFreshness(projectRoot, graph),
         ),
@@ -204,15 +207,56 @@ function callGodotMcpToolUnsafe(
 }
 
 function compactSyncPayload(result: SyncGodotProjectOk): Record<string, unknown> {
-  const { added, modified, deleted, message: _message, ...rest } = result;
-  return {
+  const {
+    added,
+    modified,
+    deleted,
+    projectRoot: _projectRoot,
+    databasePath: _databasePath,
+    message: _message,
+    parseErrors,
+    ...rest
+  } = result;
+  return removeUndefined({
     ...rest,
     addedCount: added.length,
     modifiedCount: modified.length,
     deletedCount: deleted.length,
+    parseErrorCount: parseErrors.length,
+    parseErrors: parseErrors.length > 0 ? parseErrors.slice(0, 10) : undefined,
+    parseErrorsOmitted: Math.max(0, parseErrors.length - 10) || undefined,
     changeListsOmitted: true,
     message: MCP_SYNC_MESSAGE,
-  };
+  });
+}
+
+function compactSyncErrorPayload(result: SyncGodotProjectError): Record<string, unknown> {
+  return removeUndefined({
+    ok: false,
+    reason: result.reason,
+    message: compactErrorMessage(result),
+    retryAfterMs: result.retryAfterMs,
+    lockKind: result.lockKind,
+  });
+}
+
+function compactErrorMessage(result: SyncGodotProjectError): string {
+  if (result.reason === "missing_project_godot") {
+    return "No project.godot found.";
+  }
+  return redactLocalPaths(result.message);
+}
+
+function redactLocalPaths(value: string): string {
+  return value
+    .replace(/\/(?:Users|Volumes|private|var|tmp)\/[^\s"'{}[\],)]+/g, "[local-path]")
+    .replace(/[A-Za-z]:\\[^\s"'{}[\],)]+/g, "[local-path]");
+}
+
+function removeUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  ) as T;
 }
 
 function projectPathSchema(): GodotMcpToolDefinition["inputSchema"] {
@@ -269,7 +313,7 @@ function withInitializedGraph(
   const graph = createGraphDatabase(projectRoot);
   try {
     return jsonToolResult(
-      attachFreshness(callback(graph, projectRoot), getScanAwareGraphFreshness(projectRoot, graph)),
+      attachGraphQueryFreshness(callback(graph, projectRoot), getScanAwareGraphFreshness(projectRoot, graph)),
     );
   } finally {
     graph.close();
@@ -284,6 +328,7 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
       initialized: false,
       indexFresh: false,
       pendingFiles: [],
+      pendingFileCount: 0,
       watcher: "disabled",
       lastSyncAt: null,
       lastSyncAtSource: "unknown",
@@ -307,6 +352,7 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
         edgeCount: overview.edgeCount,
         unresolvedRefCount: overview.unresolvedRefCount,
         ...freshness,
+        pendingFileCount: freshness.pendingFiles.length,
         indexFresh: false,
         message: "The gdgraph index exists but is empty. Run godot_sync before relying on graph answers.",
         nextTools: missingIndexNextTools("indexEmpty=true"),
@@ -322,6 +368,7 @@ function statusPayload(projectRoot: string): Record<string, unknown> {
       edgeCount: overview.edgeCount,
       unresolvedRefCount: overview.unresolvedRefCount,
       ...freshness,
+      pendingFileCount: freshness.pendingFiles.length,
     };
   } finally {
     graph.close();

@@ -117,9 +117,9 @@ The default MCP surface is small on purpose:
 Recommended agent flow:
 
 1. Call `godot_context`.
-2. If source is needed, pass the returned `graphId` to `godot_node`.
+2. If source is needed, expand `context.paths[pN]` to a file path, then call `godot_node({ file, symbol })` with the node `name` or `qname`.
 3. If `initialized` is `false` or `indexEmpty` is `true`, call `godot_sync` manually once, then retry `godot_context`.
-4. If `indexFresh` is `false`, call `godot_sync`.
+4. If `indexFresh` is `false`, call `godot_status` for the full pending file list or call `godot_sync` directly.
 
 Write `godot_context.query` as a short keyword and identifier query, not a natural-language task. Prefer exact class names, methods, constants, fields, resource paths, file/path fragments, and domain nouns.
 
@@ -192,15 +192,15 @@ flowchart LR
   E --> F["Agent"]
 ```
 
-`gdgraph sync` is incremental after the first index: it updates changed Godot files, removes deleted file records, and recomputes resolver-owned relationships without rewriting unchanged indexed files. `gdgraph sync --rebuild` removes `.gdgraph` first, then performs a fresh full index. Sync output reports change counts and omits path lists by default to keep CLI and agent context compact.
+`gdgraph sync` is incremental after the first index: it updates changed Godot files, removes deleted file records, and recomputes resolver-owned relationships without rewriting unchanged indexed files. `gdgraph sync --rebuild` removes `.gdgraph` first, then performs a fresh full index. Sync output reports change counts and omits path lists and local database paths by default to keep CLI and agent context compact.
 
-`gdgraph serve --mcp` runs a catch-up sync on startup when possible. While the MCP server is running, the watcher records Godot file changes and debounces the same incremental sync path. If the watcher is disabled or degraded, tool responses report stale or pending files so the agent can call `godot_sync` or `gdgraph sync` before relying on the graph.
+`gdgraph serve --mcp` runs a catch-up sync on startup when possible. While the MCP server is running, the watcher records Godot file changes and debounces the same incremental sync path. If the watcher is disabled or degraded, graph queries report compact stale metadata; use `godot_status` for the full pending file list, then call `godot_sync` or `gdgraph sync`.
 
 ## Limits
 
 `gdgraph` is static analysis. It does not run the Godot project.
 
-`parseErrors` are gdgraph parser/extractor errors only. `parseErrorScope: "gdgraph_static_parse"` and `compilerChecked: false` mean Godot compiler/editor import validation still requires running Godot or project tests separately.
+`parseErrors` are gdgraph parser/extractor errors only. Sync output returns `parseErrorCount`, at most the first 10 `parseErrors`, and `parseErrorsOmitted` when more errors exist. `parseErrorScope: "gdgraph_static_parse"` and `compilerChecked: false` mean Godot compiler/editor import validation still requires running Godot or project tests separately.
 
 It avoids guessing runtime-only behavior such as dynamic node creation, complex type flow, or string-built paths. Unresolved references stay visible instead of being turned into false edges.
 
