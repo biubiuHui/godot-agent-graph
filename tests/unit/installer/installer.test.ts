@@ -91,14 +91,9 @@ Keep this line.
 <!-- godot-agent-graph:begin codex-instructions -->
 ## Godot Graph Navigation
 
-- For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool \`godot_context\` before broad file search.
-- For \`godot_context.query\`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
-- For \`.tres\` resource queries, include path fragments and exported/resource property names or string values; treat results as navigation, not exhaustive inventory.
-- Do not write natural-language task instructions in \`godot_context.query\`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
-- Use \`godot_node\` for indexed Godot source reads instead of raw file reads.
-- If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\`, then \`gdgraph context <query> --path <project>\`.
-- Before edits, refactors, reviews, or debugging changes, use \`godot_context\` for edit-planning and bounded relationship context.
-- Treat \`godot_context.truncated\` and \`godot_node.notes.omitted\` as signs that the graph returned a bounded navigation summary, not exhaustive proof; use a narrow \`rg\` or tests for constants, enums, signal names, resource paths, and string protocols.
+- For Godot scripts, scenes, resources, signals, node paths, or call chains, use the \`godot-graph-navigation\` skill when available.
+- If the skill is unavailable, call \`godot_context\` before broad file search, then use \`godot_node\` for indexed source reads.
+- If the graph is missing or stale, run \`godot_sync\` or \`gdgraph sync <project>\`.
 <!-- godot-agent-graph:end codex-instructions -->
 `);
     expect(existsSync(codexGlobalSkillPath(homeDir))).toBe(false);

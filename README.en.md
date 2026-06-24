@@ -146,18 +146,9 @@ Do not use broad `grep`, glob, or raw file-reading loops to rebuild structure th
 
 This project uses `gdgraph` for indexed Godot structure.
 
-- For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, call `godot_context` before broad file search.
-- For `godot_context.query`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
-- For `.tres` resource queries, include path fragments and exported/resource property names or string values; treat results as navigation, not exhaustive inventory.
-- Do not write natural-language task instructions in `godot_context.query`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
-- Use `godot_node` to read indexed Godot source for a file, symbol, or graph node id.
-- Use `godot_status` to check graph freshness.
-- If `initialized` is false or `indexEmpty` is true, call `godot_sync` once before graph queries.
-- If `indexFresh` is false, call `godot_sync` or run `gdgraph sync <project>`.
-- Do not rebuild indexed Godot structure with broad `grep`, glob, or raw file-reading loops.
-- Directly read raw files only when a file is unindexed, listed as stale, or needed for external validation.
-- Treat `godot_context.truncated` and `godot_node.notes.omitted` as bounded navigation output, not exhaustive proof. For constants, enums, signal names, resource paths, or string protocols, add a narrow `rg` or test check.
-- If MCP tools are unavailable, use the `gdgraph` CLI first, then read the few source files it identifies.
+- For Godot scripts, scenes, resources, signals, node paths, or call chains, use the `godot-graph-navigation` skill when available.
+- If the skill is unavailable, call `godot_context` before broad file search, then use `godot_node` for indexed source reads.
+- If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 ```
 
 ## CLI Examples
