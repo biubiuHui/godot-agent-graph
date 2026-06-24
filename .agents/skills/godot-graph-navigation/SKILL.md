@@ -21,6 +21,8 @@ If MCP tools are unavailable, use the CLI fallback: `gdgraph sync`, `gdgraph con
 
 For `godot_context.query`, use terse identifier-heavy keyword queries. Prefer exact class names, method names, constants, fields, signal names, resource paths, file/path fragments, and domain nouns.
 
+For `.tres` resources, include path fragments such as `resources/definitions` and concrete exported/resource property names or literal string values. Resource metadata is searchable, but graph output is still ranked navigation, not exhaustive inventory proof.
+
 Do not write natural-language task instructions such as "find", "include paths", "summarize", "relevant for", or "tell me".
 
 Good:

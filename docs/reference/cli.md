@@ -62,6 +62,8 @@ This is the CLI equivalent of `godot_context`. It is a bounded navigation result
 
 Write `<query>` as a short keyword and identifier string. Prefer exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
 
+For `.tres` resources, use directory fragments plus metadata terms such as exported property names or literal string/number/boolean values. Resource metadata participates in ranking, but `context` remains a bounded navigation command, not an exhaustive inventory report.
+
 Good:
 
 ```bash

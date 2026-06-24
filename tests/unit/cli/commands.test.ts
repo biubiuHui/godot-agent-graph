@@ -98,7 +98,7 @@ describe("gdgraph CLI commands", () => {
       expect.objectContaining({
         ok: true,
         fileCount: 3,
-        addedCount: 0,
+        addedCount: 3,
         modifiedCount: 0,
         deletedCount: 0,
         parseErrorScope: "gdgraph_static_parse",

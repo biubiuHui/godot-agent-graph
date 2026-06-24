@@ -1,6 +1,6 @@
 # Minimal Fixture Walkthrough
 
-This walkthrough uses the checked-in minimal Godot fixture.
+This walkthrough uses the checked-in minimal Godot fixture. It exercises the current public CLI surface: `sync`, `status`, `context`, and `node`.
 
 From the repository root:
 
@@ -9,13 +9,13 @@ npm install
 npm run build
 ```
 
-Index the fixture:
+Index or update the fixture:
 
 ```bash
-npm run gdgraph -- init tests/fixtures/godot/minimal
+npm run gdgraph -- sync tests/fixtures/godot/minimal
 ```
 
-Check status:
+Check graph health and freshness:
 
 ```bash
 npm run gdgraph -- status tests/fixtures/godot/minimal
@@ -24,37 +24,37 @@ npm run gdgraph -- status tests/fixtures/godot/minimal
 Expected highlights:
 
 - `initialized: true`
-- `fileCount: 3`
+- `indexFresh: true`
 - project name `MinimalFixture`
 
-Search the player script:
+Ask for Agent-ready navigation context:
 
 ```bash
-npm run gdgraph -- search FixtureActor --path tests/fixtures/godot/minimal
+npm run gdgraph -- context "FixtureActor _ready fixture_main" --path tests/fixtures/godot/minimal
 ```
 
-Inspect the main scene:
+Read one indexed symbol:
 
 ```bash
-npm run gdgraph -- scene res://fixture_main.tscn --path tests/fixtures/godot/minimal
+npm run gdgraph -- node --path tests/fixtures/godot/minimal --symbol FixtureActor
 ```
 
-Explore Agent-ready context:
+Read one indexed file:
 
 ```bash
-npm run gdgraph -- explore FixtureActor --path tests/fixtures/godot/minimal
+npm run gdgraph -- node --path tests/fixtures/godot/minimal --file res://scripts/fixture_actor.gd --limit 40
 ```
 
-Analyze impact before editing:
-
-```bash
-npm run gdgraph -- impact res://scripts/fixture_actor.gd --path tests/fixtures/godot/minimal
-```
-
-After changing fixture files, sync:
+After changing fixture files, run normal incremental sync again:
 
 ```bash
 npm run gdgraph -- sync tests/fixtures/godot/minimal
+```
+
+Use a full rebuild only when you want to discard the existing graph first:
+
+```bash
+npm run gdgraph -- sync tests/fixtures/godot/minimal --rebuild
 ```
 
 Do not commit generated `.gdgraph/` fixture databases; they are local runtime artifacts.

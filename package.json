@@ -9,7 +9,8 @@
   "files": [
     "dist",
     "README.md",
-    "README.zh-CN.md",
+    "README.en.md",
+    "AGENT_INSTALL.md",
     "docs/reference",
     "examples"
   ],

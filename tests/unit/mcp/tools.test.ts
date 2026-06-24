@@ -51,6 +51,7 @@ describe("MCP Godot tools", () => {
     expect(instructions).toContain("godot_sync");
     expect(instructions).toContain("truncated=true");
     expect(instructions).toContain("notes.omitted");
+    expect(instructions).toContain("For .tres resource queries");
     expect(instructions).toContain("constants, enums, signal names, resource paths, or string protocols");
     expect(instructions).toContain("terse identifier-heavy keyword queries");
     expect(instructions).toContain("Do not write natural-language task instructions");

@@ -13,11 +13,11 @@ The graph database lives at:
 It stores:
 
 - `files`: indexed Godot files with content hash, size, modified time, parse errors, and node counts.
-- `nodes`: project, scene, scene node, script class, method, property, signal, resource, autoload, and input action nodes.
+- `nodes`: project, scene, scene node, script class, method, property, signal, resource, autoload, and input action nodes, including JSON metadata for resource properties and parser details.
 - `edges`: graph relationships such as `contains`, `attaches_script`, `calls`, `connects_signal`, `loads_resource`, `instantiates_scene`, and `main_scene`.
 - `unresolved_refs`: references extracted before resolver completion.
 - `project_metadata`: index and sync metadata.
-- `nodes_fts`: full-text search index.
+- `nodes_fts`: full-text search index for names and qualified names. Query ranking also uses node file paths and metadata text.
 
 ## Scanner and Parsers
 
@@ -64,6 +64,7 @@ Graph query APIs power both CLI and MCP:
 - traversal neighborhoods
 - Agent-ready context packages with bounded source snippets
 - exact indexed source reads by file, symbol, or graph node id
+- resource-aware search over `.tres` path fragments, property names, and primitive metadata values
 
 The public query model is intentionally small: `status`, `sync`, `context`, and `node`. Scene, resource, signal, autoload, node-path, call, and symbol-reference data remain indexed graph capabilities, but old standalone query products are not part of the current API surface.
 
@@ -79,5 +80,9 @@ The installer writes MCP server configuration for supported Agent clients:
 
 - Codex: owned block in `~/.codex/config.toml`
 - Claude Code: project `.mcp.json`
+- Cursor: project `.cursor/mcp.json`
+- opencode: project `opencode.jsonc` or existing `opencode.json`
+- Gemini: project `.gemini/settings.json`
+- Kiro: project `.kiro/settings/mcp.json`
 
 Uninstall removes only owned or exact generated gdgraph entries.

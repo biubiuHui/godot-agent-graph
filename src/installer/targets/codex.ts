@@ -257,6 +257,7 @@ function codexInstructionsBlock(): string {
 
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, use MCP tool \`godot_context\` before broad file search.
 - For \`godot_context.query\`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
+- For \`.tres\` resource queries, include path fragments and exported/resource property names or string values; treat results as navigation, not exhaustive inventory.
 - Do not write natural-language task instructions in \`godot_context.query\`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
 - Use \`godot_node\` for indexed Godot source reads instead of raw file reads.
 - If the graph is stale or missing, use \`godot_status\` then \`godot_sync\`; without MCP, run \`gdgraph sync <project>\`, then \`gdgraph context <query> --path <project>\`.

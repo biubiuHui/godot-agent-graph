@@ -1,18 +1,24 @@
 # Godot Agent Graph
 
-[中文说明](README.zh-CN.md)
+[English README](README.en.md)
 
-`gdgraph` is a local knowledge graph for Godot projects. It indexes scripts, scenes, resources, signals, autoloads, node paths, and static relationships into SQLite, then exposes that graph through a CLI and MCP tools for coding agents.
+`gdgraph` 是给 Godot 项目用的本地知识图谱工具。它会索引脚本、场景、资源、信号、autoload、节点路径和静态关系，写入 SQLite，并通过 CLI 和 MCP 工具提供给编程 Agent。
 
-Use it when an agent needs to understand a Godot project before editing. The agent can ask the graph for the relevant structure, then read only the source files that matter.
+它会把 Godot 工程构建成可查询的图谱，让 Agent 在读源码前快速定位相关模块、场景/资源链接和信号连接关系。这样可以减少反复大范围 `grep` 或遍历文件造成的上下文浪费，让 Agent 把注意力集中在真正相关的文件上。
 
-## Install
+## 安装
 
-The current public build is installed from source.
+在 npm 包发布前，当前公开版本从源码安装。
 
-Requirements:
+也可以让 Agent 自动安装：把下面这句话发给你的 Agent，让它按说明安装 `gdgraph`、同步 Godot 项目索引并写入 MCP 配置：
 
-- Node.js 20 or newer
+```text
+Fetch and follow instructions from https://raw.githubusercontent.com/biubiuHui/godot-agent-graph/master/AGENT_INSTALL.md
+```
+
+要求：
+
+- Node.js 20 或更高版本
 - npm
 
 ```bash
@@ -24,7 +30,9 @@ npm install -g .
 gdgraph version
 ```
 
-Update an existing local install:
+npm 版本发布后，可以改用 `npm install -g godot-agent-graph` 安装。
+
+更新本地版本：
 
 ```bash
 git pull
@@ -33,23 +41,23 @@ npm run build
 npm install -g .
 ```
 
-## Index A Project
+## 索引项目
 
-Pass the Godot project root, the directory that contains `project.godot`:
+传入 Godot 项目根目录，也就是包含 `project.godot` 的目录：
 
 ```bash
 gdgraph sync /path/to/godot/project
 ```
 
-The graph is stored at:
+图谱保存在：
 
 ```text
 /path/to/godot/project/.gdgraph/graph.db
 ```
 
-Do not commit `.gdgraph/`.
+不要提交 `.gdgraph/`。
 
-Common maintenance commands:
+常用维护命令：
 
 ```bash
 gdgraph status /path/to/godot/project
@@ -58,17 +66,17 @@ gdgraph sync /path/to/godot/project --rebuild
 gdgraph clean /path/to/godot/project
 ```
 
-`sync` is the normal create/update command. Use `sync --rebuild` when you need to discard the existing graph and index the project from scratch. Use `clean` only when you want to remove `.gdgraph` without rebuilding it.
+`sync` 是正常创建/更新图谱的命令。需要丢弃旧图并从头索引时使用 `sync --rebuild`。`clean` 只用于删除 `.gdgraph`，不会重新建图。
 
-## Connect An Agent
+## 接入 Agent
 
-Write MCP configuration for supported local agents:
+写入本地 Agent 的 MCP 配置：
 
 ```bash
 gdgraph install /path/to/godot/project
 ```
 
-Supported targets:
+支持的目标：
 
 - Codex
 - Claude Code
@@ -77,59 +85,61 @@ Supported targets:
 - Gemini
 - Kiro
 
-Install one target only:
+只写入一个目标：
 
 ```bash
 gdgraph install /path/to/godot/project --target codex
 ```
 
-For Codex, the default install writes MCP config plus a managed `AGENTS.md` instruction block. To also install the optional global Codex skill into `~/.codex/skills`, pass `--with-skill`:
+对 Codex 来说，默认安装会写入 MCP 配置和受管理的 `AGENTS.md` 指令块。若还想把可选的全局 Codex skill 安装到 `~/.codex/skills`，使用 `--with-skill`：
 
 ```bash
 gdgraph install /path/to/godot/project --target codex --with-skill
 ```
 
-Restart the agent after installation. The generated MCP server command is usually:
+安装后重启 Agent。生成的 MCP server 命令通常是：
 
 ```bash
 gdgraph serve --mcp /path/to/godot/project
 ```
 
-## MCP Tools
+## MCP 工具
 
-The default MCP surface is small on purpose:
+默认只暴露四个工具：
 
-| Tool | Purpose |
+| 工具 | 用途 |
 | --- | --- |
-| `godot_context` | First call for structure, references, flow, and edit planning. |
-| `godot_node` | Read indexed source for one file, symbol, or graph node id. |
-| `godot_status` | Check graph state and freshness. |
-| `godot_sync` | Refresh the graph when it may be stale. |
+| `godot_context` | 第一入口。查结构、引用、流程和改动范围。 |
+| `godot_node` | 读取一个已索引文件、符号或图节点的源码。 |
+| `godot_status` | 查看图谱状态和新鲜度。 |
+| `godot_sync` | 图谱可能落后文件时同步。 |
 
-Recommended agent flow:
+推荐顺序：
 
-1. Call `godot_context`.
-2. If source is needed, pass the returned `graphId` to `godot_node`.
-3. If `initialized` is `false` or `indexEmpty` is `true`, call `godot_sync` manually once, then retry `godot_context`.
-4. If `indexFresh` is `false`, call `godot_sync`.
+1. 先用 `godot_context`。
+2. 需要源码时，把返回的 `graphId` 传给 `godot_node`。
+3. 如果 `initialized` 是 `false` 或 `indexEmpty` 是 `true`，先手动调用一次 `godot_sync`，再重试 `godot_context`。
+4. 如果 `indexFresh` 是 `false`，先用 `godot_sync`。
 
-Write `godot_context.query` as a short keyword and identifier query, not a natural-language task. Prefer exact class names, methods, constants, fields, resource paths, file/path fragments, and domain nouns.
+`godot_context.query` 应写成短关键词/符号查询，不要写成自然语言任务。优先使用准确类名、方法名、常量名、字段名、资源路径、文件/路径片段和领域名词。
 
-Good:
+查询资源时，建议带上 `resources/definitions` 这类路径片段，以及 `.tres` 中的属性名或字符串值。资源 metadata 会参与图谱搜索，但 `godot_context` 仍然是有边界的导航结果，不是完整资源审计。
+
+推荐：
 
 ```text
 enemy_spawner spawn_wave WaveConfig export EnemyDefinition spawn_weight scene_path
 ```
 
-Avoid:
+避免：
 
 ```text
 Find enemy spawning systems and wave config resources relevant for writing a design. Include paths and summary.
 ```
 
-Do not use broad `grep`, glob, or raw file-reading loops to rebuild structure that is already indexed. Raw reads are still useful for unindexed files, files reported as stale, and external validation such as tests or compiler output.
+不要用大范围 `grep`、glob 或原始文件遍历去重建图谱已经索引的结构。只有文件未索引、工具提示 stale，或需要测试和编译器输出时，才直接读原始文件。
 
-## Suggested `AGENTS.md`
+## 建议写进 AGENTS.md
 
 ```markdown
 ## Godot Graph Navigation
@@ -138,6 +148,7 @@ This project uses `gdgraph` for indexed Godot structure.
 
 - For Godot scripts, scenes, resources, signals, autoloads, node paths, or call chains, call `godot_context` before broad file search.
 - For `godot_context.query`, use terse identifier-heavy keyword queries: exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns.
+- For `.tres` resource queries, include path fragments and exported/resource property names or string values; treat results as navigation, not exhaustive inventory.
 - Do not write natural-language task instructions in `godot_context.query`, such as "find", "include paths", "summarize", "relevant for", or "tell me".
 - Use `godot_node` to read indexed Godot source for a file, symbol, or graph node id.
 - Use `godot_status` to check graph freshness.
@@ -149,7 +160,7 @@ This project uses `gdgraph` for indexed Godot structure.
 - If MCP tools are unavailable, use the `gdgraph` CLI first, then read the few source files it identifies.
 ```
 
-## CLI Examples
+## CLI 示例
 
 ```bash
 gdgraph sync /path/to/godot/project
@@ -158,51 +169,51 @@ gdgraph node --path /path/to/godot/project --symbol FixtureActor
 gdgraph node --path /path/to/godot/project --file res://scripts/fixture_actor.gd --limit 80
 ```
 
-## Indexed Data
+## 索引内容
 
-`gdgraph` reads:
+会读取：
 
 - `project.godot`
 - `.gd`
 - `.tscn`
 - `.tres`
 
-It records:
+会记录：
 
-- project metadata, main scene, autoloads, and input actions;
-- scenes and scene nodes;
-- script classes, methods, properties, and signals;
-- resources and script attachments;
-- scene instancing;
-- node-path references;
-- statically resolvable calls and signal connections.
+- 项目元数据、主场景、autoload、input action；
+- 场景和场景节点；
+- 脚本类、方法、属性、信号；
+- 资源、资源属性和脚本挂载；
+- 场景实例关系；
+- 节点路径引用；
+- 能静态解析的方法调用和信号连接。
 
-It skips generated and external directories such as `.git/`, `.godot/`, `.import/`, `.gdgraph/`, `addons/`, `demo/`, `dist/`, and `node_modules/`.
+会跳过生成目录和外部目录，例如 `.git/`、`.godot/`、`.import/`、`.gdgraph/`、`addons/`、`demo/`、`dist/`、`node_modules/`。
 
-## How It Works
+## 工作方式
 
 ```mermaid
 flowchart LR
-  A["Godot files"] --> B["Parser and indexer"]
+  A["Godot 文件"] --> B["解析和索引"]
   B --> C[".gdgraph/graph.db"]
   C --> D["CLI"]
   C --> E["MCP server"]
   E --> F["Agent"]
 ```
 
-`gdgraph sync` is incremental after the first index: it updates changed Godot files, removes deleted file records, and recomputes resolver-owned relationships without rewriting unchanged indexed files. `gdgraph sync --rebuild` removes `.gdgraph` first, then performs a fresh full index. Sync output reports change counts and omits path lists by default to keep CLI and agent context compact.
+第一次索引之后，`gdgraph sync` 是增量同步：它更新变化过的 Godot 文件、移除已删除文件的图谱记录，并重新计算 resolver 生成的关系，不会重写未变化的已索引文件。`gdgraph sync --rebuild` 会先删除 `.gdgraph`，再进行一次全量新索引。同步输出只报告变化数量，默认省略路径列表，避免浪费 CLI 和 agent 上下文。
 
-`gdgraph serve --mcp` runs a catch-up sync on startup when possible. If the graph may lag behind disk, tool responses report stale or pending files. The watcher, when active, only tracks pending files and schedules the same sync path.
+`gdgraph serve --mcp` 启动时会尽量先同步索引。MCP server 运行期间，watcher 会记录 Godot 文件变化，并用防抖方式触发同一条增量同步路径。如果 watcher 被禁用或降级，工具响应会返回 stale 或 pending 文件，让 agent 先调用 `godot_sync` 或 `gdgraph sync`，再依赖图谱结果。
 
-## Limits
+## 边界
 
-`gdgraph` is static analysis. It does not run the Godot project.
+`gdgraph` 只做静态分析，不运行 Godot 项目。
 
-`parseErrors` are gdgraph parser/extractor errors only. `parseErrorScope: "gdgraph_static_parse"` and `compilerChecked: false` mean Godot compiler/editor import validation still requires running Godot or project tests separately.
+`parseErrors` 只表示 gdgraph 自己的静态解析/抽取错误。`parseErrorScope: "gdgraph_static_parse"` 和 `compilerChecked: false` 表示尚未经过 Godot 编译器或编辑器导入验证；这仍然需要单独运行 Godot 或项目测试。
 
-It avoids guessing runtime-only behavior such as dynamic node creation, complex type flow, or string-built paths. Unresolved references stay visible instead of being turned into false edges.
+它不会猜运行时动态创建的节点、复杂类型流或字符串拼接路径。无法确认的引用会保留为 unresolved，避免生成错误边。
 
-## Development
+## 开发
 
 ```bash
 npm install
@@ -211,20 +222,20 @@ npm run build
 npm run gdgraph -- version
 ```
 
-Try the minimal fixture:
+用最小 fixture 试跑：
 
 ```bash
 npm run gdgraph -- sync tests/fixtures/godot/minimal
 npm run gdgraph -- context FixtureActor --path tests/fixtures/godot/minimal
 ```
 
-Run the privacy check:
+隐私检查：
 
 ```bash
 npm run privacy:check
 ```
 
-## Reference
+## 参考文档
 
 - [CLI Reference](docs/reference/cli.md)
 - [MCP Tools Reference](docs/reference/mcp.md)

@@ -101,6 +101,8 @@ When either side of an edge is outside the visible node set, the formatter keeps
 
 Write `godot_context.query` as a short keyword and identifier string. Prefer exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns. Avoid natural-language task wording such as `find`, `include paths`, `summarize`, `relevant for`, or `tell me`.
 
+Resource nodes include `.tres` property metadata. For resource-heavy tasks, query with path fragments and concrete property names or literal values. Treat returned resource matches as ranked navigation evidence, not proof that every matching resource has been listed.
+
 `godot_node` supports three target modes:
 
 ```json
@@ -132,9 +134,6 @@ Agent output uses hard response budgets to avoid large payloads:
 | Response kind | Default budget |
 | --- | --- |
 | `godot_context` | `4800` estimated JSON characters |
-| Legacy context tools | `7200` estimated JSON characters |
-| Search payloads | `3200` estimated JSON characters |
-| Impact payloads | `4800` estimated JSON characters |
 
 When a payload exceeds its budget, lower-priority snippets are dropped first, then relationships, then nodes. The response sets `truncated: true` and increments `omitted` counts so an agent can decide whether to ask a narrower graph question.
 

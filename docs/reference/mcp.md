@@ -99,6 +99,8 @@ spawn_weight constants probability odds candidate_generation
 
 Avoid task-style wording such as `find`, `include paths`, `summarize`, `relevant for`, or `tell me`; those words add noise without improving graph ranking.
 
+For `.tres` resources, include directory fragments such as `resources/definitions` and metadata terms such as exported property names or literal string/number/boolean values. Resource metadata participates in search and ranking, but `godot_context` remains a bounded navigation package, not an exhaustive resource inventory.
+
 `context` uses the compact agent format:
 
 ```json
