@@ -116,7 +116,14 @@ describe("indexGodotProject", () => {
         expect.objectContaining({ kind: "scene_node" }),
       );
       expect(getNode(graph, "script:res://scripts/fixture_actor.gd")).toEqual(
-        expect.objectContaining({ kind: "script_class" }),
+        expect.objectContaining({
+          kind: "script_class",
+          addressKind: "indexed_symbol",
+          ownerPath: "res://scripts/fixture_actor.gd",
+          readablePath: "res://scripts/fixture_actor.gd",
+          displayPath: "res://scripts/fixture_actor.gd",
+          referencePath: null,
+        }),
       );
       expect(getNode(graph, "method:res://scripts/fixture_actor.gd:_ready")).toEqual(
         expect.objectContaining({ kind: "method" }),

@@ -42,8 +42,22 @@ describe("createGraphDatabase", () => {
           "nodes",
           "nodes_fts",
           "project_metadata",
-          "schema_migrations",
           "unresolved_refs",
+        ]),
+      );
+      const oldMigrationTableName = ["schema", "migrations"].join("_");
+      expect(tables).not.toContain(oldMigrationTableName);
+
+      const nodeColumns = graph.sqlite
+        .pragma("table_info(nodes)")
+        .map((row) => (row as { name: string }).name);
+      expect(nodeColumns).toEqual(
+        expect.arrayContaining([
+          "address_kind",
+          "owner_path",
+          "readable_path",
+          "display_path",
+          "reference_path",
         ]),
       );
 

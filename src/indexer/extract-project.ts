@@ -23,6 +23,11 @@ export function extractProjectGodotGraph(
       name: projectName,
       qualifiedName: projectName,
       filePath: project.filePath,
+      addressKind: "project_virtual",
+      ownerPath: project.filePath,
+      readablePath: project.filePath,
+      displayPath: project.filePath,
+      referencePath: null,
       startLine: null,
       endLine: null,
       signature: null,
@@ -57,6 +62,7 @@ export function extractProjectGodotGraph(
       name: autoload.name,
       qualifiedName: autoload.name,
       filePath: project.filePath,
+      ...indexedSymbolAddress(project.filePath),
       startLine: autoload.line,
       endLine: autoload.line,
       signature: `${autoload.name}=${autoload.singleton ? "*" : ""}${autoload.path}`,
@@ -88,6 +94,7 @@ export function extractProjectGodotGraph(
       name: inputAction.name,
       qualifiedName: inputAction.name,
       filePath: project.filePath,
+      ...indexedSymbolAddress(project.filePath),
       startLine: inputAction.line,
       endLine: inputAction.line,
       signature: inputAction.name,
@@ -101,6 +108,18 @@ export function extractProjectGodotGraph(
     nodes,
     edges,
     unresolvedRefs,
+  };
+}
+
+function indexedSymbolAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "indexed_symbol",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
   };
 }
 

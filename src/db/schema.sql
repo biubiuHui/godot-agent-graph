@@ -1,10 +1,5 @@
 pragma foreign_keys = on;
 
-create table if not exists schema_migrations (
-  version text primary key,
-  applied_at integer not null
-);
-
 create table if not exists files (
   path text primary key,
   kind text not null,
@@ -22,6 +17,11 @@ create table if not exists nodes (
   name text not null,
   qualified_name text not null,
   file_path text,
+  address_kind text not null default 'opaque',
+  owner_path text,
+  readable_path text,
+  display_path text,
+  reference_path text,
   start_line integer,
   end_line integer,
   signature text,
@@ -79,6 +79,3 @@ create virtual table if not exists nodes_fts using fts5(
   qualified_name,
   tokenize = 'unicode61'
 );
-
-insert or ignore into schema_migrations (version, applied_at)
-values ('001_initial_graph_storage', unixepoch());

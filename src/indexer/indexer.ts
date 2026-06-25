@@ -276,6 +276,11 @@ function detachMissingFileReferences(collected: CollectedGraph, knownFilePaths?:
     return {
       ...node,
       filePath: null,
+      addressKind: "resource_missing_ref",
+      ownerPath: null,
+      readablePath: null,
+      displayPath: node.filePath,
+      referencePath: node.filePath,
       metadata: {
         ...node.metadata,
         missingFilePath: node.filePath,

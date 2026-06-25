@@ -50,6 +50,7 @@ function extractSceneGraph(
       name: basename(resource.filePath),
       qualifiedName: resource.filePath,
       filePath: resource.filePath,
+      ...indexedFileAddress(resource.filePath),
       startLine: resource.scene?.line ?? null,
       endLine: null,
       signature: null,
@@ -75,6 +76,7 @@ function extractSceneGraph(
       name: subResource.id,
       qualifiedName: `${resource.filePath}#${subResource.id}`,
       filePath: resource.filePath,
+      ...subresourceAddress(resource.filePath),
       startLine: subResource.line,
       endLine: null,
       signature: subResource.type,
@@ -94,6 +96,7 @@ function extractSceneGraph(
       name: sceneNode.name,
       qualifiedName: `${resource.filePath}:${nodePath(sceneNode)}`,
       filePath: resource.filePath,
+      ...indexedSymbolAddress(resource.filePath),
       startLine: sceneNode.line,
       endLine: null,
       signature: sceneNode.type,
@@ -162,6 +165,7 @@ function extractTresGraph(
       name: basename(resource.filePath),
       qualifiedName: resource.filePath,
       filePath: resource.filePath,
+      ...resourceMainAddress(resource.filePath),
       startLine: resource.resource?.line ?? null,
       endLine: null,
       signature: resource.resource?.type ?? null,
@@ -191,6 +195,7 @@ function extractTresGraph(
       name: subResource.id,
       qualifiedName: `${resource.filePath}#${subResource.id}`,
       filePath: resource.filePath,
+      ...subresourceAddress(resource.filePath),
       startLine: subResource.line,
       endLine: null,
       signature: subResource.type,
@@ -236,6 +241,7 @@ function extResourceNode(resource: GodotExtResource, updatedAt: number): GraphNo
     name: basename(resource.path),
     qualifiedName: resource.path,
     filePath: resource.path,
+    ...externalResourceAddress(resource.path),
     startLine: resource.line,
     endLine: null,
     signature: resource.type,
@@ -244,6 +250,66 @@ function extResourceNode(resource: GodotExtResource, updatedAt: number): GraphNo
       type: resource.type,
     },
     updatedAt,
+  };
+}
+
+function indexedFileAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "indexed_file",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+  };
+}
+
+function indexedSymbolAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "indexed_symbol",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+  };
+}
+
+function resourceMainAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "resource_main",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+  };
+}
+
+function subresourceAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "resource_subresource",
+    ownerPath: filePath,
+    readablePath: null,
+    displayPath: filePath,
+    referencePath: null,
+  };
+}
+
+function externalResourceAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "resource_external_ref",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: filePath,
   };
 }
 

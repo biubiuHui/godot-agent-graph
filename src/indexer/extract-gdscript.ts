@@ -109,6 +109,7 @@ export function extractGdscriptGraph(
       name: scriptName,
       qualifiedName: scriptName,
       filePath: script.filePath,
+      ...indexedSymbolAddress(script.filePath),
       startLine: script.className?.line ?? 1,
       endLine: null,
       signature: script.className ? `class_name ${script.className.name}` : null,
@@ -152,6 +153,7 @@ function addSymbolNodes(
       name: innerClass.name,
       qualifiedName: `${scriptClassName(script)}.${innerClass.name}`,
       filePath: script.filePath,
+      ...indexedSymbolAddress(script.filePath),
       startLine: innerClass.line,
       endLine: null,
       signature: `class ${innerClass.name}:`,
@@ -175,6 +177,7 @@ function addSymbolNodes(
       name: method.name,
       qualifiedName: symbolQualifiedName(script, method.ownerName, method.name, duplicateLine),
       filePath: script.filePath,
+      ...indexedSymbolAddress(script.filePath),
       startLine: method.line,
       endLine: null,
       signature: method.signature,
@@ -200,6 +203,7 @@ function addSymbolNodes(
       name: property.name,
       qualifiedName: symbolQualifiedName(script, property.ownerName, property.name, duplicateLine),
       filePath: script.filePath,
+      ...indexedSymbolAddress(script.filePath),
       startLine: property.line,
       endLine: null,
       signature: property.signature,
@@ -226,6 +230,7 @@ function addSymbolNodes(
       name: signal.name,
       qualifiedName: symbolQualifiedName(script, signal.ownerName, signal.name, duplicateLine),
       filePath: script.filePath,
+      ...indexedSymbolAddress(script.filePath),
       startLine: signal.line,
       endLine: null,
       signature: `signal ${signal.name}`,
@@ -234,6 +239,18 @@ function addSymbolNodes(
     });
     edges.push(containsEdge(symbolParentNodeId(script.filePath, signal.ownerName), id));
   }
+}
+
+function indexedSymbolAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "indexed_symbol",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+  };
 }
 
 function addUnresolvedRefs(

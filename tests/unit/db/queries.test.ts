@@ -36,6 +36,30 @@ afterEach(() => {
   }
 });
 
+function indexedSymbolAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "indexed_symbol",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+  };
+}
+
+function resourceMainAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "resource_main",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+  };
+}
+
 describe("graph storage queries", () => {
   it("stores and retrieves files, nodes, edges, metadata, unresolved refs, and FTS results", () => {
     const graph = createGraphDatabase(createTempProjectRoot());
@@ -61,6 +85,7 @@ describe("graph storage queries", () => {
         name: "FixtureActor",
         qualifiedName: "FixtureActor",
         filePath: file.path,
+        ...indexedSymbolAddress(file.path),
         startLine: 1,
         endLine: 20,
         signature: "class_name FixtureActor",
@@ -74,6 +99,7 @@ describe("graph storage queries", () => {
         name: "_ready",
         qualifiedName: "FixtureActor._ready",
         filePath: file.path,
+        ...indexedSymbolAddress(file.path),
         startLine: 5,
         endLine: 8,
         signature: "func _ready()",
@@ -87,6 +113,7 @@ describe("graph storage queries", () => {
         name: "fixture_actor.gd",
         qualifiedName: "res://scripts/fixture_actor.gd",
         filePath: file.path,
+        ...resourceMainAddress(file.path),
         startLine: 1,
         endLine: null,
         signature: "Script",
@@ -99,6 +126,13 @@ describe("graph storage queries", () => {
       upsertNode(graph, rawScriptResourceNode);
 
       expect(getNode(graph, scriptNode.id)).toEqual(scriptNode);
+      expect(getNode(graph, scriptNode.id)).toEqual(expect.objectContaining({
+        addressKind: "indexed_symbol",
+        ownerPath: file.path,
+        readablePath: file.path,
+        displayPath: file.path,
+        referencePath: null,
+      }));
       expect(searchNodes(graph, "FixtureActor")).toEqual([scriptNode, methodNode]);
       expect(searchNodes(graph, "fixture_actor.gd").map((node) => node.id)).toEqual([
         scriptNode.id,
@@ -115,6 +149,11 @@ describe("graph storage queries", () => {
         name: "fixture_stats.tres",
         qualifiedName: "res://resources/fixture_stats.tres",
         filePath: null,
+        addressKind: "resource_missing_ref",
+        ownerPath: null,
+        readablePath: null,
+        displayPath: "res://resources/fixture_stats.tres",
+        referencePath: "res://resources/fixture_stats.tres",
         startLine: 1,
         endLine: null,
         signature: "Resource",
@@ -198,6 +237,7 @@ describe("graph storage queries", () => {
         name: "artifact_001.tres",
         qualifiedName: "res://resources/artifacts/artifact_001.tres",
         filePath: file.path,
+        ...resourceMainAddress(file.path),
         startLine: 1,
         endLine: null,
         signature: "Resource",
@@ -244,6 +284,7 @@ describe("graph storage queries", () => {
         name: "_ready",
         qualifiedName: "ReferenceSource._ready",
         filePath: file.path,
+        ...indexedSymbolAddress(file.path),
         startLine: 5,
         endLine: 8,
         signature: "func _ready()",
@@ -295,6 +336,7 @@ describe("graph storage queries", () => {
           name,
           qualifiedName: name,
           filePath: path,
+          ...indexedSymbolAddress(path),
           startLine: 1,
           endLine: null,
           signature: `class_name ${name}`,

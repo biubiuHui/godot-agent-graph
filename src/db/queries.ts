@@ -26,6 +26,11 @@ interface NodeRow {
   name: string;
   qualified_name: string;
   file_path: string | null;
+  address_kind: GraphNode["addressKind"];
+  owner_path: string | null;
+  readable_path: string | null;
+  display_path: string | null;
+  reference_path: string | null;
   start_line: number | null;
   end_line: number | null;
   signature: string | null;
@@ -155,15 +160,24 @@ export function upsertNode(graph: GraphDatabase, node: GraphNode): void {
     graph.sqlite
       .prepare(
         `insert into nodes (
-          id, kind, name, qualified_name, file_path, start_line, end_line, signature, metadata, updated_at
+          id, kind, name, qualified_name, file_path,
+          address_kind, owner_path, readable_path, display_path, reference_path,
+          start_line, end_line, signature, metadata, updated_at
         ) values (
-          @id, @kind, @name, @qualifiedName, @filePath, @startLine, @endLine, @signature, @metadata, @updatedAt
+          @id, @kind, @name, @qualifiedName, @filePath,
+          @addressKind, @ownerPath, @readablePath, @displayPath, @referencePath,
+          @startLine, @endLine, @signature, @metadata, @updatedAt
         )
         on conflict(id) do update set
           kind = excluded.kind,
           name = excluded.name,
           qualified_name = excluded.qualified_name,
           file_path = excluded.file_path,
+          address_kind = excluded.address_kind,
+          owner_path = excluded.owner_path,
+          readable_path = excluded.readable_path,
+          display_path = excluded.display_path,
+          reference_path = excluded.reference_path,
           start_line = excluded.start_line,
           end_line = excluded.end_line,
           signature = excluded.signature,
@@ -608,6 +622,11 @@ function nodeFromRow(row: NodeRow): GraphNode {
     name: row.name,
     qualifiedName: row.qualified_name,
     filePath: row.file_path,
+    addressKind: row.address_kind,
+    ownerPath: row.owner_path,
+    readablePath: row.readable_path,
+    displayPath: row.display_path,
+    referencePath: row.reference_path,
     startLine: row.start_line,
     endLine: row.end_line,
     signature: row.signature,

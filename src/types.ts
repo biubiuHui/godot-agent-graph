@@ -15,6 +15,19 @@ export const NODE_KINDS = [
 
 export type NodeKind = (typeof NODE_KINDS)[number];
 
+export const NODE_ADDRESS_KINDS = [
+  "indexed_file",
+  "indexed_symbol",
+  "resource_main",
+  "resource_subresource",
+  "resource_external_ref",
+  "resource_missing_ref",
+  "project_virtual",
+  "opaque",
+] as const;
+
+export type NodeAddressKind = (typeof NODE_ADDRESS_KINDS)[number];
+
 export const EDGE_KINDS = [
   "contains",
   "attaches_script",
@@ -57,6 +70,11 @@ export interface GraphNode {
   name: string;
   qualifiedName: string;
   filePath: string | null;
+  addressKind: NodeAddressKind;
+  ownerPath: string | null;
+  readablePath: string | null;
+  displayPath: string | null;
+  referencePath: string | null;
   startLine: number | null;
   endLine: number | null;
   signature: string | null;
