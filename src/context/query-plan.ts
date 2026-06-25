@@ -21,7 +21,7 @@ export function buildQueryPlan(query: string): ContextQueryPlan {
 
   return {
     rawQuery: query,
-    strategy: classifyContextQuery(query),
+    strategy: inferContextStrategy(query),
     exactTerms: uniqueStrings([...resourcePathAnchors, ...identifierTerms]),
     resourcePathAnchors,
     resourceDirectoryAnchors,
@@ -31,7 +31,7 @@ export function buildQueryPlan(query: string): ContextQueryPlan {
   };
 }
 
-function classifyContextQuery(query: string): ContextStrategy {
+function inferContextStrategy(query: string): ContextStrategy {
   if (/\b(dependents?|dependencies|references?|refs?|callers?|callees?|impact)\b/i.test(query)) {
     return "relationship";
   }
