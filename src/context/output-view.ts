@@ -9,6 +9,12 @@ export interface ViewNode {
   name: string;
   qualifiedName: string;
   filePath: string | null;
+  addressKind: string;
+  ownerPath: string | null;
+  readablePath: string | null;
+  displayPath: string | null;
+  referencePath: string | null;
+  selector: Record<string, string | null>;
   startLine: number | null;
   signature: string | null;
   priority: number;
@@ -144,6 +150,12 @@ export function contextToOutputView(input: ContextOutputViewInput): ContextOutpu
       name: node.name,
       qualifiedName: node.qualifiedName,
       filePath: node.filePath,
+      addressKind: node.addressKind,
+      ownerPath: node.ownerPath,
+      readablePath: node.readablePath,
+      displayPath: node.displayPath,
+      referencePath: node.referencePath,
+      selector: node.selector,
       startLine: node.startLine,
       signature: node.signature,
       priority: protectedNodeIds.has(node.id) ? 0 : 50 + index,
@@ -244,44 +256,15 @@ export function parseRelationshipToView(
 }
 
 export function relationshipEndpointIds(relationships: ViewRelationship[]): string[] {
-  return relationships.flatMap((relationship) => [
-    ...(isGraphId(relationship.source) ? [relationship.source] : []),
-    ...(isGraphId(relationship.target) ? [relationship.target] : []),
-  ]);
-}
-
-export function relationshipPaths(relationship: ViewRelationship): string[] {
-  return [
-    graphIdParts(relationship.source)?.path,
-    graphIdParts(relationship.target)?.path,
-    relationship.target.startsWith("res://") ? relationship.target : null,
-  ].filter((path): path is string => Boolean(path));
-}
-
-export function isGraphId(value: string): boolean {
-  return graphIdParts(value) !== null;
-}
-
-export function graphIdParts(id: string): { kind: string; path: string; suffix?: string } | null {
-  const firstColon = id.indexOf(":");
-  if (firstColon <= 0) {
-    return null;
-  }
-
-  const kind = id.slice(0, firstColon);
-  const rest = id.slice(firstColon + 1);
-  if (!rest.startsWith("res://")) {
-    return null;
-  }
-
-  const suffixSeparator = rest.indexOf(":", "res://".length);
-  const path = suffixSeparator >= 0 ? rest.slice(0, suffixSeparator) : rest;
-  const suffix = suffixSeparator >= 0 ? rest.slice(suffixSeparator + 1) : undefined;
-  return removeUndefined({ kind, path, suffix });
-}
-
-function removeUndefined<T extends Record<string, unknown>>(value: T): T {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
-  ) as T;
+  return relationships.flatMap((relationship) => {
+    if (!relationship.source) {
+      return [];
+    }
+    const targetIsDirectUnresolvedPath =
+      relationship.provenance === "unresolved" && relationship.target.startsWith("res://");
+    return [
+      relationship.source,
+      ...(targetIsDirectUnresolvedPath ? [] : [relationship.target]),
+    ];
+  });
 }

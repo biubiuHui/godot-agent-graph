@@ -1,6 +1,5 @@
 import type { AgentBlastRadius } from "./explore.js";
 import {
-  graphIdParts,
   relationshipEndpointIds,
   type AgentOutputView,
   type NodeReadOutputView,
@@ -183,26 +182,21 @@ function visiblePathValues(view: AgentOutputView): string[] {
     return visibleNodeReadPathValues(view);
   }
 
-  const visibleNodeIds = new Set(view.nodes.map((node) => node.graphId));
   return uniqueStrings([
-    ...view.nodes.flatMap((node) => node.filePath ? [node.filePath] : []),
+    ...view.nodes.flatMap(pathForNode),
     ...view.snippets.map((snippet) => snippet.filePath),
-    ...view.relationships.flatMap((relationship) => relationshipOutputPathValues(relationship, visibleNodeIds)),
-    ...view.pathsBetween.flatMap((relationship) => relationshipOutputPathValues(relationship, visibleNodeIds)),
+    ...view.relationships.flatMap(relationshipOutputPathValues),
+    ...view.pathsBetween.flatMap(relationshipOutputPathValues),
     ...(view.blastRadius?.checkFiles ?? []),
   ]);
 }
 
-function relationshipOutputPathValues(relationship: ViewRelationship, visibleNodeIds: Set<string>): string[] {
-  const endpointSelectorPaths = relationshipEndpointIds([relationship])
-    .filter((endpointId) => !visibleNodeIds.has(endpointId))
-    .map((endpointId) => graphIdParts(endpointId)?.path)
-    .filter((path): path is string => Boolean(path));
+function relationshipOutputPathValues(relationship: ViewRelationship): string[] {
   const unresolvedTargetPath = relationship.provenance === "unresolved" && relationship.target.startsWith("res://")
     ? [relationship.target]
     : [];
 
-  return [...endpointSelectorPaths, ...unresolvedTargetPath];
+  return unresolvedTargetPath;
 }
 
 function finalizeNodeReadOutput(view: NodeReadOutputView): AgentFormattedNodeRead {
@@ -256,7 +250,12 @@ function visibleNodeReadPathValues(view: NodeReadOutputView): string[] {
 }
 
 function pathForNode(node: ViewNode): string[] {
-  return node.filePath ? [node.filePath] : [];
+  const path = viewNodeDisplayPath(node);
+  return path ? [path] : [];
+}
+
+function viewNodeDisplayPath(node: ViewNode): string | null {
+  return node.displayPath ?? node.filePath;
 }
 
 function nodeReadNoteNodes(notes: ViewRelationshipNoteGroups | undefined): ViewNode[] {
@@ -306,7 +305,7 @@ function formatNode(
     kind: node.kind,
     name: node.name,
     qname: displayQualifiedName(node),
-    path: node.filePath ? pathRefs.pathToRef[node.filePath] : undefined,
+    path: pathRefForNode(node, pathRefs),
     line: node.startLine ?? undefined,
     signature: node.signature ?? undefined,
   });
@@ -331,7 +330,7 @@ function formatNodeReadGraphNode(
     kind: node.kind,
     name: node.name,
     qname: displayQualifiedName(node),
-    path: node.filePath ? pathRefs.pathToRef[node.filePath] : undefined,
+    path: pathRefForNode(node, pathRefs),
     line: node.startLine ?? undefined,
     signature: node.signature ?? undefined,
   });
@@ -408,9 +407,8 @@ function formatSelectors(
       continue;
     }
     const ref = nodeIntern.idToRef[endpointId];
-    const selector = formatGraphIdSelector(endpointId, pathRefs);
-    if (ref && selector) {
-      selectors[ref] = selector;
+    if (ref) {
+      selectors[ref] = { id: endpointId };
     }
   }
   return selectors;
@@ -420,48 +418,25 @@ function formatSelector(
   node: ViewNode,
   pathRefs: { pathToRef: Record<string, string> },
 ): AgentFormattedSelector {
-  if (node.filePath) {
-    const path = pathRefs.pathToRef[node.filePath];
-    const idPrefix = `${node.kind}:${node.filePath}:`;
-    if (path && node.graphId.startsWith(idPrefix)) {
-      return {
-        kind: node.kind,
-        path,
-        suffix: node.graphId.slice(idPrefix.length),
-      };
-    }
-
-    const exactPathId = `${node.kind}:${node.filePath}`;
-    if (path && node.graphId === exactPathId) {
-      return {
-        kind: node.kind,
-        path,
-      };
-    }
-  }
-
-  return { id: node.graphId };
+  const selector = node.selector ?? {
+    id: node.graphId,
+    kind: node.kind,
+    path: viewNodeDisplayPath(node),
+  };
+  const path = selector.path ? pathRefs.pathToRef[selector.path] : undefined;
+  return removeUndefined({
+    id: path ? undefined : selector.id ?? node.graphId,
+    kind: selector.kind ?? node.kind,
+    path,
+  });
 }
 
-function formatGraphIdSelector(
-  id: string,
+function pathRefForNode(
+  node: ViewNode,
   pathRefs: { pathToRef: Record<string, string> },
-): AgentFormattedSelector | null {
-  const parts = graphIdParts(id);
-  if (!parts) {
-    return { id };
-  }
-
-  const path = pathRefs.pathToRef[parts.path];
-  if (!path) {
-    return { id };
-  }
-
-  return removeUndefined({
-    kind: parts.kind,
-    path,
-    suffix: parts.suffix,
-  });
+): string | undefined {
+  const path = viewNodeDisplayPath(node);
+  return path ? pathRefs.pathToRef[path] : undefined;
 }
 
 function needsGraphIdSelector(node: ViewNode): boolean {

@@ -6,6 +6,7 @@ import { getFile, getNode, listNodes, searchNodes } from "../db/queries.js";
 import { loadGraphSnapshot, visibleEdges } from "../graph/traversal.js";
 import { getScanAwareGraphFreshness } from "../sync/freshness.js";
 import type { GraphNode } from "../types.js";
+import { addressForNode } from "../graph/node-address.js";
 import { applyOutputBudget } from "./output-budget.js";
 import { finalizeAgentOutput } from "./output-finalize.js";
 import {
@@ -224,12 +225,19 @@ function isGraphNode(value: GraphNode | FilePayloadTarget): value is GraphNode {
 }
 
 function graphNodeToViewNode(node: GraphNode, priority: number, protectedNode: boolean): ViewNode {
+  const address = addressForNode(node);
   return {
     graphId: node.id,
     kind: node.kind,
     name: node.name,
     qualifiedName: node.qualifiedName,
     filePath: node.filePath,
+    addressKind: address.kind,
+    ownerPath: address.ownerPath,
+    readablePath: address.readablePath,
+    displayPath: address.displayPath,
+    referencePath: address.referencePath,
+    selector: address.selector,
     startLine: node.startLine,
     signature: node.signature,
     priority,

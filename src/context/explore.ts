@@ -15,6 +15,7 @@ import {
   visibleEdges,
 } from "../graph/traversal.js";
 import type { GraphNode, UnresolvedRef } from "../types.js";
+import { addressForNode } from "../graph/node-address.js";
 
 export interface ContextQueryOptions {
   projectRoot: string;
@@ -46,6 +47,12 @@ export interface AgentNodeSummary {
   name: string;
   qualifiedName: string;
   filePath: string | null;
+  addressKind: GraphNode["addressKind"];
+  ownerPath: string | null;
+  readablePath: string | null;
+  displayPath: string | null;
+  referencePath: string | null;
+  selector: Record<string, string | null>;
   startLine: number | null;
   signature: string | null;
 }
@@ -477,12 +484,19 @@ function kindPriority(kind: string): number {
 }
 
 function summarizeAgentNode(node: GraphNode): AgentNodeSummary {
+  const address = addressForNode(node);
   return {
     id: node.id,
     kind: node.kind,
     name: node.name,
     qualifiedName: node.qualifiedName,
     filePath: node.filePath,
+    addressKind: address.kind,
+    ownerPath: address.ownerPath,
+    readablePath: address.readablePath,
+    displayPath: address.displayPath,
+    referencePath: address.referencePath,
+    selector: address.selector,
     startLine: node.startLine,
     signature: node.signature,
   };

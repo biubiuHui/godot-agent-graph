@@ -12,12 +12,19 @@ function node(
   filePath: string | null,
   signature: string | null = null,
 ) {
+  const selector = filePath ? { id, kind, path: filePath } : { id };
   return {
     id,
     kind,
     name,
     qualifiedName: name,
     filePath,
+    addressKind: filePath ? "indexed_symbol" : "opaque",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+    selector,
     startLine: 1,
     signature,
   };
@@ -30,6 +37,12 @@ function viewNode(id: string, kind: string, name: string, filePath: string) {
     name,
     qualifiedName: name,
     filePath,
+    addressKind: "indexed_symbol",
+    ownerPath: filePath,
+    readablePath: filePath,
+    displayPath: filePath,
+    referencePath: null,
+    selector: { id, kind, path: filePath },
     startLine: 1,
     signature: null,
     priority: 0,
@@ -313,7 +326,6 @@ describe("agent output formatter", () => {
       n1: {
         kind: "scene_node",
         path: "p1",
-        suffix: "Main/FixtureActor",
       },
     });
     expect(JSON.stringify(output).match(/res:\/\/scenes\/fixture_main\.tscn/g)?.length).toBe(1);
@@ -443,17 +455,12 @@ describe("agent output formatter", () => {
     expect(output.nodes).toHaveLength(1);
     expect(output.nodes[0].id).toBe("n1");
     expect(output.omitted.nodes).toBe(1);
-    expect(output.prefixes).toEqual({
-      "@p1": "res://scripts/",
-    });
     expect(output.paths).toEqual({
-      p1: "@p1/visible.gd",
-      p2: "@p1/omitted.gd",
+      p1: "res://scripts/visible.gd",
     });
     expect(output.selectors).toEqual({
       n2: {
-        kind: "script",
-        path: "p2",
+        id: "script:res://scripts/omitted.gd",
       },
     });
     expect(output.relationships).toEqual([
@@ -466,7 +473,7 @@ describe("agent output formatter", () => {
     ]);
     expect(JSON.stringify(output)).not.toContain("graphTo");
     expect(JSON.stringify(output)).not.toContain("graphFrom");
-    expect(JSON.stringify(output)).not.toContain("script:res://scripts/omitted.gd");
+    expect(Object.values(output.paths)).not.toContain("res://scripts/omitted.gd");
   });
 
   it("prunes paths for nodes omitted from the formatted output", () => {
@@ -554,14 +561,11 @@ describe("agent output formatter", () => {
     ]);
     expect(output.omitted.relationships).toBe(2);
     expect(output.paths).toEqual({
-      p1: "@p1/visible.gd",
-      p2: "@p1/kept.gd",
+      p1: "res://scripts/visible.gd",
     });
     expect(output.selectors).toEqual({
       n2: {
-        kind: "method",
-        path: "p2",
-        suffix: "run",
+        id: "method:res://scripts/kept.gd:run",
       },
     });
     const serialized = JSON.stringify(output);
@@ -787,5 +791,38 @@ describe("agent output formatter", () => {
       },
     ]);
     expect(Object.values(output.paths)).toEqual(["res://resources/fixture_stats.tres"]);
+  });
+
+  it("does not derive hidden endpoint paths from graph ids without address fields", () => {
+    const output = finalizeAgentOutput({
+      kind: "context",
+      query: "hidden endpoint",
+      entryPointIds: ["script:res://scripts/fixture_actor.gd"],
+      pathsBetween: [],
+      nodes: [
+        viewNode(
+          "script:res://scripts/fixture_actor.gd",
+          "script_class",
+          "FixtureActor",
+          "res://scripts/fixture_actor.gd",
+        ),
+      ],
+      relationships: [
+        {
+          source: "script:res://scripts/fixture_actor.gd",
+          kind: "loads_resource",
+          target: "resource:res://missing/fixture_hidden.tres",
+          provenance: "resource-parser",
+          priority: 1,
+          protected: true,
+        },
+      ],
+      snippets: [],
+      omitted: { nodes: 0, relationships: 0, snippets: 0 },
+      truncated: false,
+      budget: { maxChars: 8_000, estimatedChars: 0 },
+    });
+
+    expect(Object.values(output.paths)).toEqual(["res://scripts/fixture_actor.gd"]);
   });
 });
