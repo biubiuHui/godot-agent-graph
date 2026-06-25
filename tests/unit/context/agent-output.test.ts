@@ -424,9 +424,46 @@ describe("agent output formatter", () => {
     );
 
     expect(output.truncated).toBe(true);
+    expect(output).toEqual(expect.objectContaining({
+      resultHint: "navigation_sample_not_exhaustive",
+    }));
     expect(output.omitted.snippets).toBeGreaterThan(0);
     expect(output.budget.maxChars).toBe(400);
     expect(output.budget.estimatedChars).toBeLessThanOrEqual(400);
+  });
+
+  it("marks incomplete bounded context as a navigation sample", () => {
+    const output = formatAgentContext({
+      query: "FixtureActor",
+      strategy: "symbol-first",
+      completeness: {
+        scope: "bounded_navigation",
+        complete: false,
+      },
+      nodes: [
+        {
+          id: "script:res://scripts/fixture_actor.gd",
+          kind: "script_class",
+          name: "FixtureActor",
+          qualifiedName: "FixtureActor",
+          filePath: "res://scripts/fixture_actor.gd",
+          startLine: 1,
+          signature: "class_name FixtureActor",
+        },
+      ],
+      relationships: [],
+      files: ["res://scripts/fixture_actor.gd"],
+      snippets: [],
+    });
+
+    expect(output).toEqual(expect.objectContaining({
+      completeness: {
+        scope: "bounded_navigation",
+        complete: false,
+      },
+      resultHint: "navigation_sample_not_exhaustive",
+      truncated: false,
+    }));
   });
 
   it("uses compact selectors for relationship endpoints outside visible nodes", () => {

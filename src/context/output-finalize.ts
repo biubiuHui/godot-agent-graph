@@ -38,6 +38,7 @@ export interface AgentFormattedContext {
   query: string;
   strategy?: ContextStrategy;
   completeness?: AgentContextCompleteness;
+  resultHint?: "navigation_sample_not_exhaustive";
   prefixes?: Record<string, string>;
   paths: Record<string, string>;
   entryPoints: string[];
@@ -134,10 +135,15 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
     ...view.entryPointIds,
     ...(view.blastRadius?.entryPoints ?? []),
   ]);
+  const truncated = view.truncated ||
+    view.omitted.nodes > 0 ||
+    view.omitted.relationships > 0 ||
+    view.omitted.snippets > 0;
   const output: AgentFormattedContext = {
     query: view.query ?? "",
     ...(view.strategy ? { strategy: view.strategy } : {}),
     ...(view.completeness ? { completeness: view.completeness } : {}),
+    ...(isNavigationSample(view, truncated) ? { resultHint: "navigation_sample_not_exhaustive" } : {}),
     ...(Object.keys(pathRefs.prefixes).length > 0 ? { prefixes: pathRefs.prefixes } : {}),
     paths: pathRefs.paths,
     entryPoints: view.entryPointIds
@@ -161,10 +167,7 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
         end: snippet.endLine,
         text: snippet.text,
       })),
-    truncated: view.truncated ||
-      view.omitted.nodes > 0 ||
-      view.omitted.relationships > 0 ||
-      view.omitted.snippets > 0,
+    truncated,
     omitted: { ...view.omitted },
     budget: {
       maxChars: view.budget.maxChars,
@@ -181,6 +184,10 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
   output.budget.estimatedChars = stableEstimatedChars(output);
   assertContextOutputInvariants(output);
   return output;
+}
+
+function isNavigationSample(view: AgentOutputView & { kind: "context" }, truncated: boolean): boolean {
+  return truncated || view.completeness?.complete === false;
 }
 
 export function createAgentPathRefs(rawPaths: string[]): AgentPathRefs {

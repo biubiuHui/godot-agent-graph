@@ -213,6 +213,51 @@ describe("ranked context seed selection", () => {
     ]);
   });
 
+  it("keeps directory-matched resources ahead of metadata resources for path-fragment queries", () => {
+    const plan = buildQueryPlan(
+      "resources/items FixtureItemData display_name description sample policy",
+    );
+    const itemAlpha = makeNode(
+      "resource:res://resources/items/fixture_item_alpha.tres",
+      "resource",
+      "fixture_item_alpha.tres",
+      "res://resources/items/fixture_item_alpha.tres",
+    );
+    const itemBeta = makeNode(
+      "resource:res://resources/items/fixture_item_beta.tres",
+      "resource",
+      "fixture_item_beta.tres",
+      "res://resources/items/fixture_item_beta.tres",
+    );
+    const supportPolicy = makeNode(
+      "resource:res://resources/policies/fixture_item_policy.tres",
+      "resource",
+      "fixture_item_policy.tres",
+      "res://resources/policies/fixture_item_policy.tres",
+    );
+    const supportCatalog = makeNode(
+      "resource:res://resources/catalogs/fixture_item_catalog.tres",
+      "resource",
+      "fixture_item_catalog.tres",
+      "res://resources/catalogs/fixture_item_catalog.tres",
+    );
+
+    const selection = selectRankedSeeds(
+      plan,
+      emptyPools({
+        resourceMetadata: [supportPolicy, supportCatalog],
+        resourcePath: [itemAlpha, itemBeta],
+      }),
+      null,
+    );
+
+    expect(selection.strategy).toBe("resource-first");
+    expect(selection.seeds.slice(0, 2).map((node) => node.filePath)).toEqual([
+      "res://resources/items/fixture_item_alpha.tres",
+      "res://resources/items/fixture_item_beta.tres",
+    ]);
+  });
+
   it("keeps resource-name anchored resource selection inside anchored files", () => {
     const plan = buildQueryPlan(
       "FixturePoolData FixturePoolEntryData sample_pool_primary weight payload_id sample_pool entry",

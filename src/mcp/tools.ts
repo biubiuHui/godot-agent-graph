@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { formatAgentContext } from "../context/agent-output.js";
+import { formatAgentContext, type AgentFormattedContext, type AgentFormattedNode } from "../context/agent-output.js";
 import { agentOutputInvariantReason } from "../context/output-finalize.js";
 import { exploreGodotContext } from "../context/explore.js";
 import { getNodePayload } from "../context/node-payload.js";
@@ -160,30 +160,18 @@ function callGodotMcpToolUnsafe(
         maxFiles: optionalNumber(args, "maxFiles") ?? 6,
         includeCode: optionalBoolean(args, "includeCode") ?? false,
       });
+      const formattedContext = formatAgentContext(context, {
+        maxChars: 4_800,
+        maxNodes: 40,
+        maxRelationships: 40,
+        maxSnippets: 6,
+      });
       return {
         ok: true,
         query,
         ...indexSummary(graph),
-        context: formatAgentContext(context, {
-          maxChars: 4_800,
-          maxNodes: 40,
-          maxRelationships: 40,
-          maxSnippets: 6,
-        }),
-        nextTools: [
-          {
-            tool: "godot_node",
-            reason: "Use for indexed source reads when a specific file, symbol, or graph node needs source.",
-          },
-          {
-            tool: "godot_status",
-            reason: "Use to inspect freshness when context indicates stale or pending indexed files.",
-          },
-          {
-            tool: "godot_sync",
-            reason: "Use only when indexFresh=false or watcher catch-up is unavailable.",
-          },
-        ],
+        context: formattedContext,
+        nextTools: contextNextTools(formattedContext),
       };
     });
   }
@@ -219,6 +207,105 @@ function callGodotMcpToolUnsafe(
     ok: false,
     error: `Unknown tool: ${name}`,
   });
+}
+
+function contextNextTools(context: AgentFormattedContext): Array<Record<string, unknown>> {
+  const nodeFollowups = concreteNodeFollowups(context);
+  return [
+    ...(nodeFollowups.length > 0
+      ? nodeFollowups
+      : [{
+        tool: "godot_node",
+        reason: "Use for indexed source reads when a specific file, symbol, or graph node needs source.",
+      }]),
+    {
+      tool: "godot_status",
+      reason: "Use to inspect freshness when context indicates stale or pending indexed files.",
+    },
+    {
+      tool: "godot_sync",
+      reason: "Use only when indexFresh=false or watcher catch-up is unavailable.",
+    },
+  ];
+}
+
+function concreteNodeFollowups(context: AgentFormattedContext): Array<Record<string, unknown>> {
+  const seen = new Set<string>();
+  const followups: Array<Record<string, unknown>> = [];
+
+  for (const node of context.nodes) {
+    const args = godotNodeArgsForContextNode(context, node);
+    if (!args) {
+      continue;
+    }
+
+    if (seen.has(args.file)) {
+      continue;
+    }
+
+    seen.add(args.file);
+    followups.push({
+      tool: "godot_node",
+      reason: "symbol" in args
+        ? "Read source for the top indexed file and symbol from this context result."
+        : "Read source for the top indexed file from this context result.",
+      args,
+    });
+
+    if (followups.length >= 2) {
+      break;
+    }
+  }
+
+  return followups;
+}
+
+function godotNodeArgsForContextNode(
+  context: AgentFormattedContext,
+  node: AgentFormattedNode,
+): Record<string, string> | null {
+  if (!node.path) {
+    return null;
+  }
+
+  const file = expandContextPath(context, node.path);
+  if (!file) {
+    return null;
+  }
+
+  if (node.kind === "resource" || node.kind === "scene" || node.kind === "file") {
+    return { file };
+  }
+
+  return hasFileScopedSymbolSelector(node)
+    ? { file, symbol: node.name }
+    : null;
+}
+
+function hasFileScopedSymbolSelector(node: AgentFormattedNode): boolean {
+  return [
+    "script_class",
+    "inner_class",
+    "method",
+    "property",
+    "signal",
+    "autoload",
+  ].includes(node.kind) && node.name.length > 0;
+}
+
+function expandContextPath(context: AgentFormattedContext, pathRef: string): string | null {
+  const compactPath = context.paths[pathRef];
+  if (!compactPath) {
+    return null;
+  }
+
+  for (const [prefixRef, prefixValue] of Object.entries(context.prefixes ?? {})) {
+    if (compactPath.startsWith(`${prefixRef}/`)) {
+      return compactPath.replace(`${prefixRef}/`, prefixValue);
+    }
+  }
+
+  return compactPath;
 }
 
 function compactSyncPayload(result: SyncGodotProjectOk): Record<string, unknown> {

@@ -63,6 +63,17 @@ function selectResourceSeeds(plan: ContextQueryPlan, pools: ContextCandidatePool
     ])));
   }
 
+  if (plan.resourceDirectoryAnchors.length > 0) {
+    return limitSeeds(limitResourceSeedsPerFile(uniqueNodes([
+      ...pools.exactPath,
+      ...pools.resourcePath,
+      ...pools.resourceMetadata,
+      ...pools.symbolExact,
+      ...sortFallbackSymbols(pools.symbolText),
+      ...sortFallbackSymbols(usableFallback(plan, pools)),
+    ])));
+  }
+
   return limitSeeds(limitResourceSeedsPerFile(uniqueNodes([
     ...pools.exactPath,
     ...pools.exactResourceName,

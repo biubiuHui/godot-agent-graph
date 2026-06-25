@@ -282,6 +282,10 @@ describe("MCP Godot tools", () => {
           expect.objectContaining({
             tool: "godot_node",
             reason: expect.stringContaining("source"),
+            args: {
+              file: "res://scripts/fixture_actor.gd",
+              symbol: "FixtureActor",
+            },
           }),
           expect.objectContaining({
             tool: "godot_status",
@@ -423,7 +427,7 @@ describe("MCP Godot tools", () => {
         }),
       ]),
     );
-    expect(countSubstring(responseText, "res://scripts/fixture_actor.gd")).toBeLessThanOrEqual(2);
+    expect(countSubstring(responseText, "res://scripts/fixture_actor.gd")).toBeLessThanOrEqual(3);
   });
 
   it("adds compact blast radius for edit-planning context", () => {
