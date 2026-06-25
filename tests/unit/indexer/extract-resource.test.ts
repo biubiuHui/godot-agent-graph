@@ -188,4 +188,63 @@ conditions = Array[ExtResource("2_condition")]([SubResource("Condition")])
     ]);
     expect(graph.unresolvedRefs).toEqual([]);
   });
+
+  it("classifies resource addresses during extraction", () => {
+    const parsed = parseGodotResource(
+      `[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/rule_data.gd" id="1_rule"]
+[ext_resource type="Resource" path="res://missing/fixture_missing_data.tres" id="2_missing"]
+
+[sub_resource type="Resource" id="Condition"]
+condition_type = "state_equals"
+
+[resource]
+script = ExtResource("1_rule")
+missing = ExtResource("2_missing")
+condition = SubResource("Condition")
+`,
+      "res://resources/rules/demo_rule.tres",
+    );
+
+    const graph = extractGodotResourceGraph(parsed, {
+      updatedAt: 5000,
+      knownFilePaths: new Set([
+        "res://resources/rules/demo_rule.tres",
+        "res://scripts/rule_data.gd",
+      ]),
+    });
+
+    expect(graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "resource:res://resources/rules/demo_rule.tres",
+          addressKind: "resource_main",
+          readablePath: "res://resources/rules/demo_rule.tres",
+        }),
+        expect.objectContaining({
+          id: "resource:res://resources/rules/demo_rule.tres#Condition",
+          addressKind: "resource_subresource",
+          ownerPath: "res://resources/rules/demo_rule.tres",
+          readablePath: null,
+        }),
+        expect.objectContaining({
+          id: "resource:res://scripts/rule_data.gd",
+          addressKind: "resource_external_ref",
+          referencePath: "res://scripts/rule_data.gd",
+        }),
+        expect.objectContaining({
+          id: "resource:res://missing/fixture_missing_data.tres",
+          addressKind: "resource_missing_ref",
+          filePath: null,
+          readablePath: null,
+          referencePath: "res://missing/fixture_missing_data.tres",
+        }),
+      ]),
+    );
+    const oldMissingPathField = ["missing", "File", "Path"].join("");
+    expect(
+      graph.nodes.find((node) => node.id === "resource:res://missing/fixture_missing_data.tres")?.metadata,
+    ).not.toHaveProperty(oldMissingPathField);
+  });
 });

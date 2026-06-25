@@ -1,0 +1,15 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/fixture_resource_data.gd" id="1_data"]
+[ext_resource type="Resource" path="res://resources/fixture_profile.tres" id="2_profile"]
+[ext_resource type="Resource" path="res://missing/fixture_missing_data.tres" id="3_missing"]
+
+[sub_resource type="Resource" id="SceneSub"]
+script = ExtResource("1_data")
+label = "Scene Sub"
+
+[node name="Root" type="Node"]
+script = ExtResource("1_data")
+profile = ExtResource("2_profile")
+missing = ExtResource("3_missing")
+sample = SubResource("SceneSub")

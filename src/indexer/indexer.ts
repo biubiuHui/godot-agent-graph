@@ -208,6 +208,8 @@ function collectGraph(
   projectRoot: string,
   options: CollectGraphOptions = {},
 ): CollectedGraph {
+  const knownFilePaths = options.knownFilePaths ??
+    new Set(absolutePaths.map((absolutePath) => toResPath(projectRoot, absolutePath)));
   const collected: CollectedGraph = {
     files: [],
     nodes: [],
@@ -248,7 +250,7 @@ function collectGraph(
     } else if (fileKind === "scene" || fileKind === "resource") {
       const parsed = parseGodotResource(contents, resPath);
       fileParseErrors.push(...formatErrors(parsed.errors));
-      const extraction = extractGodotResourceGraph(parsed, { updatedAt });
+      const extraction = extractGodotResourceGraph(parsed, { knownFilePaths, updatedAt });
       collected.nodes.push(...extraction.nodes);
       collected.edges.push(...extraction.edges);
       collected.unresolvedRefs.push(...extraction.unresolvedRefs);
@@ -258,35 +260,10 @@ function collectGraph(
     collected.files.push(fileRecord(absolutePath, resPath, fileKind, contents, fileParseErrors, collected.nodes.length - beforeNodeCount));
   }
 
-  detachMissingFileReferences(collected, options.knownFilePaths);
   filterAutoloadCandidateRefs(collected);
   recountFileNodes(collected);
 
   return collected;
-}
-
-function detachMissingFileReferences(collected: CollectedGraph, knownFilePaths?: Set<string>): void {
-  const indexedFiles = knownFilePaths ?? new Set(collected.files.map((file) => file.path));
-
-  collected.nodes = collected.nodes.map((node) => {
-    if (node.filePath === null || indexedFiles.has(node.filePath)) {
-      return node;
-    }
-
-    return {
-      ...node,
-      filePath: null,
-      addressKind: "resource_missing_ref",
-      ownerPath: null,
-      readablePath: null,
-      displayPath: node.filePath,
-      referencePath: node.filePath,
-      metadata: {
-        ...node.metadata,
-        missingFilePath: node.filePath,
-      },
-    };
-  });
 }
 
 function filterAutoloadCandidateRefs(collected: CollectedGraph): void {

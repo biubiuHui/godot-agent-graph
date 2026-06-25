@@ -9,6 +9,7 @@ import type {
 import type { EdgeKind, GraphEdge, GraphNode, JsonObject, UnresolvedRef } from "../types.js";
 
 export interface GodotResourceGraphExtractionOptions {
+  knownFilePaths?: ReadonlySet<string>;
   updatedAt: number;
 }
 
@@ -65,7 +66,10 @@ function extractSceneGraph(
   const unresolvedRefs: UnresolvedRef[] = [];
 
   for (const extResource of resource.extResources) {
-    nodes.push(extResourceNode(extResource, options.updatedAt));
+    const node = extResourceNode(extResource, options);
+    if (node) {
+      nodes.push(node);
+    }
     edges.push(edge(sceneId, resourceNodeId(extResource.path), "loads_resource"));
   }
 
@@ -181,7 +185,10 @@ function extractTresGraph(
   const edges: GraphEdge[] = [];
 
   for (const extResource of resource.extResources) {
-    nodes.push(extResourceNode(extResource, options.updatedAt));
+    const node = extResourceNode(extResource, options);
+    if (node) {
+      nodes.push(node);
+    }
     edges.push(edge(resourceId, resourceNodeId(extResource.path), "loads_resource"));
   }
 
@@ -234,14 +241,24 @@ function addScriptAttachmentEdge(
   }
 }
 
-function extResourceNode(resource: GodotExtResource, updatedAt: number): GraphNode {
+function extResourceNode(
+  resource: GodotExtResource,
+  options: GodotResourceGraphExtractionOptions,
+): GraphNode | null {
+  if (options.knownFilePaths?.has(resource.path) && isIndexedResourceMainPath(resource.path)) {
+    return null;
+  }
+
+  const filePath = options.knownFilePaths && !options.knownFilePaths.has(resource.path)
+    ? null
+    : resource.path;
   return {
     id: resourceNodeId(resource.path),
     kind: "resource",
     name: basename(resource.path),
     qualifiedName: resource.path,
-    filePath: resource.path,
-    ...externalResourceAddress(resource.path),
+    filePath,
+    ...(filePath ? externalResourceAddress(resource.path) : missingResourceAddress(resource.path)),
     startLine: resource.line,
     endLine: null,
     signature: resource.type,
@@ -249,8 +266,12 @@ function extResourceNode(resource: GodotExtResource, updatedAt: number): GraphNo
       extResourceId: resource.id,
       type: resource.type,
     },
-    updatedAt,
+    updatedAt: options.updatedAt,
   };
+}
+
+function isIndexedResourceMainPath(path: string): boolean {
+  return /\.(?:res|tres)$/i.test(path);
 }
 
 function indexedFileAddress(
@@ -308,6 +329,18 @@ function externalResourceAddress(
     addressKind: "resource_external_ref",
     ownerPath: filePath,
     readablePath: filePath,
+    displayPath: filePath,
+    referencePath: filePath,
+  };
+}
+
+function missingResourceAddress(
+  filePath: string,
+): Pick<GraphNode, "addressKind" | "ownerPath" | "readablePath" | "displayPath" | "referencePath"> {
+  return {
+    addressKind: "resource_missing_ref",
+    ownerPath: null,
+    readablePath: null,
     displayPath: filePath,
     referencePath: filePath,
   };

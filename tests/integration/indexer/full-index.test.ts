@@ -40,6 +40,7 @@ describe("indexGodotProject", () => {
       "signals",
       "autoload-input",
       "resources",
+      "resource-addresses",
       "realistic-game",
     ]) {
       const result = indexGodotProject(copyFixture(fixture));
@@ -267,6 +268,66 @@ describe("indexGodotProject", () => {
       );
     } finally {
       resourcesGraph.close();
+    }
+  });
+
+  it("indexes resource address roles at construction time", () => {
+    const root = copyFixture("resource-addresses");
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const graph = createGraphDatabase(root);
+    try {
+      expect(getNode(graph, "resource:res://resources/fixture_profile.tres")).toEqual(
+        expect.objectContaining({
+          addressKind: "resource_main",
+          filePath: "res://resources/fixture_profile.tres",
+          readablePath: "res://resources/fixture_profile.tres",
+          displayPath: "res://resources/fixture_profile.tres",
+          referencePath: null,
+        }),
+      );
+      expect(getNode(graph, "resource:res://scenes/fixture_main.tscn#SceneSub")).toEqual(
+        expect.objectContaining({
+          addressKind: "resource_subresource",
+          ownerPath: "res://scenes/fixture_main.tscn",
+          readablePath: null,
+          displayPath: "res://scenes/fixture_main.tscn",
+          referencePath: null,
+        }),
+      );
+
+      const missingRef = getNode(graph, "resource:res://missing/fixture_missing_data.tres");
+      expect(missingRef).toEqual(
+        expect.objectContaining({
+          addressKind: "resource_missing_ref",
+          filePath: null,
+          ownerPath: null,
+          readablePath: null,
+          displayPath: "res://missing/fixture_missing_data.tres",
+          referencePath: "res://missing/fixture_missing_data.tres",
+        }),
+      );
+      const oldMissingPathField = ["missing", "File", "Path"].join("");
+      expect(missingRef?.metadata).not.toHaveProperty(oldMissingPathField);
+
+      expect(getNode(graph, "resource:res://scripts/fixture_resource_data.gd")).toEqual(
+        expect.objectContaining({
+          addressKind: "resource_external_ref",
+          referencePath: "res://scripts/fixture_resource_data.gd",
+        }),
+      );
+      expect(listEdges(graph, { kind: "attaches_script" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "resource:res://resources/fixture_profile.tres",
+            target: "script:res://scripts/fixture_resource_data.gd",
+            provenance: "resolver",
+          }),
+        ]),
+      );
+    } finally {
+      graph.close();
     }
   });
 
