@@ -138,6 +138,7 @@ export function inputSchemaForTool(toolName: string): Record<string, z.ZodTypeAn
       offset: z.number().optional(),
       limit: z.number().optional(),
       includeCode: z.boolean().optional(),
+      includeNotes: z.boolean().describe("Include relationship notes around the selected node or file.").optional(),
       symbolsOnly: z.boolean().optional(),
     };
   }

@@ -52,6 +52,11 @@ export interface AgentNodeSummary {
 
 const MAX_CONTEXT_NODES = 60;
 const MAX_CONTEXT_RELATIONSHIPS = 80;
+const MAX_CONTEXT_SEEDS = 12;
+const MAX_RESOURCE_SEEDS_PER_FILE = 2;
+const MAX_RESOURCE_NODES_PER_FILE = 2;
+const EXACT_CODE_SEED_INSERT_AFTER = 3;
+const MAX_EXACT_CODE_SEEDS = 4;
 const WEAK_CONTEXT_TERMS = new Set([
   "base",
   "builder",
@@ -152,7 +157,7 @@ function finalizeContext(
   pathsBetween: string[],
   options: ContextQueryOptions,
 ): AgentContext {
-  const unique = uniqueNodes(nodes).slice(0, MAX_CONTEXT_NODES);
+  const unique = limitResourceNodesPerFile(uniqueNodes(nodes)).slice(0, MAX_CONTEXT_NODES);
   const visibleNodeIds = new Set(unique.map((node) => node.id));
   const files = collectFilePaths(unique, options.maxFiles ?? 6);
   const entryPoints = [...entryPointIds].filter((id) => visibleNodeIds.has(id));
@@ -205,15 +210,91 @@ function selectContextSeeds(graph: GraphDatabase, query: string): GraphNode[] {
     ...exactTerms.flatMap((term) => searchNodes(graph, term, 5)),
   ]);
 
-  return candidates
+  const ranked = candidates
     .map((node, index) => ({
       node,
       index,
       score: contextSeedScore(node, query, exactTermSet),
     }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map((item) => item.node)
-    .slice(0, 12);
+    .map((item) => item.node);
+
+  return diversifyContextSeeds(ranked, exactTermSet);
+}
+
+function diversifyContextSeeds(ranked: GraphNode[], exactTerms: Set<string>): GraphNode[] {
+  const capped = capResourceSeedsPerFile(ranked);
+  const exactCodeSeeds = ranked
+    .filter((node) => isExactCodeSeed(node, exactTerms))
+    .slice(0, MAX_EXACT_CODE_SEEDS);
+
+  return uniqueNodes([
+    ...capped.slice(0, EXACT_CODE_SEED_INSERT_AFTER),
+    ...exactCodeSeeds,
+    ...capped,
+  ]).slice(0, MAX_CONTEXT_SEEDS);
+}
+
+function capResourceSeedsPerFile(ranked: GraphNode[]): GraphNode[] {
+  const resourceCounts = new Map<string, number>();
+  return ranked.filter((node) => {
+    if (node.kind !== "resource") {
+      return true;
+    }
+
+    const key = node.filePath ?? node.qualifiedName;
+    const count = resourceCounts.get(key) ?? 0;
+    if (count >= MAX_RESOURCE_SEEDS_PER_FILE) {
+      return false;
+    }
+    resourceCounts.set(key, count + 1);
+    return true;
+  });
+}
+
+function isExactCodeSeed(node: GraphNode, exactTerms: Set<string>): boolean {
+  return node.kind !== "resource" &&
+    (exactTerms.has(node.name) ||
+      exactTerms.has(node.qualifiedName) ||
+      (node.filePath ? exactTerms.has(node.filePath) : false) ||
+      exactTerms.has(node.id));
+}
+
+function limitResourceNodesPerFile(nodes: GraphNode[]): GraphNode[] {
+  const resourcesByFile = new Map<string, GraphNode[]>();
+  for (const node of nodes) {
+    if (node.kind !== "resource") {
+      continue;
+    }
+
+    const key = node.filePath ?? node.qualifiedName;
+    resourcesByFile.set(key, [...(resourcesByFile.get(key) ?? []), node]);
+  }
+
+  const allowedResourceIds = new Set<string>();
+  for (const resourceNodes of resourcesByFile.values()) {
+    let allowedForFile = 0;
+    for (const node of [...resourceNodes].sort(resourceNodeSort)) {
+      if (allowedForFile >= MAX_RESOURCE_NODES_PER_FILE) {
+        break;
+      }
+      allowedResourceIds.add(node.id);
+      allowedForFile += 1;
+    }
+  }
+
+  return nodes.filter((node) => node.kind !== "resource" || allowedResourceIds.has(node.id));
+}
+
+function resourceNodeSort(left: GraphNode, right: GraphNode): number {
+  return resourceNodePriority(left) - resourceNodePriority(right);
+}
+
+function resourceNodePriority(node: GraphNode): number {
+  if (node.filePath && (node.id === `resource:${node.filePath}` || node.qualifiedName === node.filePath)) {
+    return 0;
+  }
+  return 1;
 }
 
 function extractContextTerms(query: string): string[] {

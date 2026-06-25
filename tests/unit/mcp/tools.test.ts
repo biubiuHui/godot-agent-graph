@@ -54,6 +54,7 @@ describe("MCP Godot tools", () => {
     expect(instructions).toContain("godot_context");
     expect(instructions).toContain("godot_node");
     expect(instructions).toContain("graph-native source read");
+    expect(instructions).toContain("includeNotes=false");
     expect(instructions).toContain("Do not rebuild indexed Godot structure with broad grep/read");
     expect(instructions).toContain("raw Read only for unindexed files or files listed as stale");
     expect(instructions).toContain("indexFresh");
@@ -643,6 +644,38 @@ describe("MCP Godot tools", () => {
       }),
     );
     expect(response).not.toHaveProperty("projectRoot");
+    expect(JSON.stringify(response)).not.toContain("filePath");
+  });
+
+  it("can read indexed file source without relationship notes", () => {
+    const root = copyFixture("realistic-game");
+    const indexResult = indexGodotProject(root);
+    expect(indexResult.ok).toBe(true);
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_node", {
+        projectPath: root,
+        file: "res://scripts/actors/fixture_actor.gd",
+        offset: 1,
+        limit: 6,
+        includeNotes: false,
+      }),
+    );
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        target: expect.objectContaining({
+          kind: "file",
+          path: "p1",
+        }),
+        source: expect.objectContaining({
+          path: "p1",
+          text: expect.stringContaining("class_name FixtureActor"),
+        }),
+      }),
+    );
+    expect(response).not.toHaveProperty("notes");
     expect(JSON.stringify(response)).not.toContain("filePath");
   });
 

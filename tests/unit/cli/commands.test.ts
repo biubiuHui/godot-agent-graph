@@ -197,6 +197,26 @@ describe("gdgraph CLI commands", () => {
     );
     expect(symbolWithoutCode).not.toHaveProperty("source");
 
+    const sourceWithoutNotes = await runCli([
+      "node",
+      "--path",
+      root,
+      "--file",
+      "res://scripts/fixture_actor.gd",
+      "--limit",
+      "4",
+      "--no-notes",
+    ]);
+    expect(sourceWithoutNotes).toEqual(
+      expect.objectContaining({
+        ok: true,
+        source: expect.objectContaining({
+          text: expect.stringContaining("class_name FixtureActor"),
+        }),
+      }),
+    );
+    expect(sourceWithoutNotes).not.toHaveProperty("notes");
+
     const symbolsOnly = await runCli([
       "node",
       "--path",

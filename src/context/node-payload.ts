@@ -6,9 +6,17 @@ import { getFile, getNode, listNodes, searchNodes } from "../db/queries.js";
 import { loadGraphSnapshot, visibleEdges } from "../graph/traversal.js";
 import { getScanAwareGraphFreshness } from "../sync/freshness.js";
 import type { GraphNode } from "../types.js";
-import { createAgentPathRefs, type AgentPathRefs } from "./agent-output.js";
+import { applyOutputBudget } from "./output-budget.js";
+import { finalizeAgentOutput } from "./output-finalize.js";
+import {
+  nodeReadToOutputView,
+  type ViewFileTarget,
+  type ViewNode,
+  type ViewRelationshipNoteGroups,
+} from "./output-view.js";
 
 const NODE_NOTE_LIMIT = 8;
+const NODE_READ_MAX_CHARS = 16_000;
 
 interface RelationshipNoteEntry {
   node: GraphNode;
@@ -54,6 +62,7 @@ export function getNodePayload(
   const nodeId = optionalString(args, "id");
   const symbol = optionalString(args, "symbol");
   const includeCode = optionalBoolean(args, "includeCode") ?? true;
+  const includeNotes = optionalBoolean(args, "includeNotes") ?? true;
   const symbolsOnly = optionalBoolean(args, "symbolsOnly") ?? false;
 
   if (!filePath && !nodeId && !symbol) {
@@ -71,11 +80,11 @@ export function getNodePayload(
   }
 
   if (symbol) {
-    return getSymbolNodePayload(graph, projectRoot, symbol, filePath, includeCode, symbolsOnly);
+    return getSymbolNodePayload(graph, projectRoot, symbol, filePath, includeCode, includeNotes, symbolsOnly);
   }
 
   if (filePath) {
-    return getFileNodePayload(graph, projectRoot, filePath, args, includeCode, symbolsOnly);
+    return getFileNodePayload(graph, projectRoot, filePath, args, includeCode, includeNotes, symbolsOnly);
   }
 
   const node = getNode(graph, nodeId!);
@@ -90,7 +99,7 @@ export function getNodePayload(
   return formatNodePayload({
     target: node,
     symbols: symbolsOnly && node.filePath ? symbolsForFile(graph, node.filePath) : undefined,
-    notes: relationshipNotesForNodes(graph, [node]),
+    notes: includeNotes ? relationshipNotesForNodes(graph, [node]) : undefined,
     source: includeCode && !symbolsOnly && node.filePath ? sourceForNode(graph, projectRoot, node) : undefined,
     staleFilePaths,
   });
@@ -102,6 +111,7 @@ function getSymbolNodePayload(
   symbol: string,
   filePath: string | null,
   includeCode: boolean,
+  includeNotes: boolean,
   symbolsOnly: boolean,
 ): Record<string, unknown> {
   const node = findNodeForSymbol(graph, symbol, filePath);
@@ -118,7 +128,7 @@ function getSymbolNodePayload(
   return formatNodePayload({
     target: node,
     symbols: symbolsOnly && node.filePath ? symbolsForFile(graph, node.filePath) : undefined,
-    notes: relationshipNotesForNodes(graph, [node]),
+    notes: includeNotes ? relationshipNotesForNodes(graph, [node]) : undefined,
     source: includeCode && !symbolsOnly && node.filePath ? sourceForNode(graph, projectRoot, node) : undefined,
     staleFilePaths,
   });
@@ -130,6 +140,7 @@ function getFileNodePayload(
   filePath: string,
   args: Record<string, unknown>,
   includeCode: boolean,
+  includeNotes: boolean,
   symbolsOnly: boolean,
 ): Record<string, unknown> {
   const file = getFile(graph, filePath);
@@ -150,7 +161,7 @@ function getFileNodePayload(
       nodeCount: file.nodeCount,
     },
     symbols,
-    notes: relationshipNotesForNodes(graph, fileNodes),
+    notes: includeNotes ? relationshipNotesForNodes(graph, fileNodes) : undefined,
     source: includeCode && !symbolsOnly
       ? sourceWindow(projectRoot, filePath, {
           offset: optionalNumber(args, "offset") ?? 1,
@@ -181,129 +192,65 @@ function findNodeForSymbol(graph: GraphDatabase, symbol: string, filePath: strin
 function formatNodePayload(input: {
   target: GraphNode | FilePayloadTarget;
   symbols?: GraphNode[];
-  notes: RawRelationshipNotes;
+  notes?: RawRelationshipNotes;
   source?: SourceWindowPayload;
   staleFilePaths: string[];
 }): Record<string, unknown> {
-  const graphNodes = uniqueNodes([
-    ...(isGraphNode(input.target) ? [input.target] : []),
-    ...(input.symbols ?? []),
-    ...input.notes.callers,
-    ...input.notes.callees,
-    ...input.notes.dependents,
-    ...input.notes.dependencies,
-  ]);
-  const pathRefs = createAgentPathRefs(uniqueStrings([
-    ...graphNodes.flatMap((node) => node.filePath ? [node.filePath] : []),
-    ...(!isGraphNode(input.target) ? [input.target.filePath] : []),
-    ...(input.source?.filePath ? [input.source.filePath] : []),
-    ...input.staleFilePaths,
-  ]));
-  const nodeRefs = createNodeRefs(graphNodes);
-  const expandedNodeIds = new Set([
-    ...(isGraphNode(input.target) ? [input.target.id] : []),
-    ...(input.symbols ?? []).map((node) => node.id),
-  ]);
-
-  return removeUndefined({
-    ok: true,
-    ...(Object.keys(pathRefs.prefixes).length > 0 ? { prefixes: pathRefs.prefixes } : {}),
-    paths: pathRefs.paths,
+  const view = nodeReadToOutputView({
     target: isGraphNode(input.target)
-      ? formatGraphNode(input.target, pathRefs, nodeRefs)
-      : formatFileTarget(input.target, pathRefs),
-    symbols: input.symbols ? input.symbols.map((node) => formatGraphNode(node, pathRefs, nodeRefs)) : undefined,
-    notes: formatRelationshipNotes(input.notes, pathRefs, nodeRefs, expandedNodeIds),
-    source: input.source ? formatSource(input.source, pathRefs) : undefined,
-    stale: input.staleFilePaths.length > 0 ? true : undefined,
-    staleFiles: input.staleFilePaths.length > 0
-      ? input.staleFilePaths
-          .map((filePath) => pathRefs.pathToRef[filePath])
-          .filter((path): path is string => Boolean(path))
-      : undefined,
+      ? graphNodeToViewNode(input.target, 0, true)
+      : fileTargetToViewTarget(input.target),
+    symbols: (input.symbols ?? []).map((node, index) => graphNodeToViewNode(node, 10 + index, true)),
+    notes: input.notes ? relationshipNotesToView(input.notes) : undefined,
+    source: input.source,
+    staleFilePaths: input.staleFilePaths,
+    maxChars: NODE_READ_MAX_CHARS,
   });
+
+  return finalizeAgentOutput(applyOutputBudget(view, {
+    maxNodes: 0,
+    maxRelationships: 0,
+    maxSnippets: 0,
+    maxChars: NODE_READ_MAX_CHARS,
+  })) as unknown as Record<string, unknown>;
 }
 
-function formatFileTarget(target: FilePayloadTarget, pathRefs: AgentPathRefs): Record<string, unknown> {
+function isGraphNode(value: GraphNode | FilePayloadTarget): value is GraphNode {
+  return "id" in value;
+}
+
+function graphNodeToViewNode(node: GraphNode, priority: number, protectedNode: boolean): ViewNode {
+  return {
+    graphId: node.id,
+    kind: node.kind,
+    name: node.name,
+    qualifiedName: node.qualifiedName,
+    filePath: node.filePath,
+    startLine: node.startLine,
+    signature: node.signature,
+    priority,
+    protected: protectedNode,
+  };
+}
+
+function fileTargetToViewTarget(target: FilePayloadTarget): ViewFileTarget {
   return {
     kind: "file",
-    path: pathRefs.pathToRef[target.filePath],
+    filePath: target.filePath,
     fileKind: target.fileKind,
     nodeCount: target.nodeCount,
   };
 }
 
-function formatGraphNode(
-  node: GraphNode,
-  pathRefs: AgentPathRefs,
-  nodeRefs: Map<string, string>,
-): Record<string, unknown> {
-  return removeUndefined({
-    id: nodeRefs.get(node.id),
-    kind: node.kind,
-    name: node.name,
-    qname: displayQualifiedName(node),
-    path: node.filePath ? pathRefs.pathToRef[node.filePath] : undefined,
-    line: node.startLine ?? undefined,
-    signature: node.signature ?? undefined,
-  });
-}
-
-function displayQualifiedName(node: GraphNode): string | undefined {
-  if (!node.qualifiedName || node.qualifiedName === node.name) {
-    return undefined;
-  }
-  if (node.qualifiedName.startsWith("res://")) {
-    return undefined;
-  }
-  return node.qualifiedName;
-}
-
-function formatRelationshipNotes(
-  notes: RawRelationshipNotes,
-  pathRefs: AgentPathRefs,
-  nodeRefs: Map<string, string>,
-  expandedNodeIds: Set<string>,
-): Record<string, unknown> {
+function relationshipNotesToView(notes: RawRelationshipNotes): ViewRelationshipNoteGroups {
   return {
-    callers: notes.callers.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
-    callees: notes.callees.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
-    dependents: notes.dependents.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
-    dependencies: notes.dependencies.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
+    callers: notes.callers.map((node, index) => graphNodeToViewNode(node, 20 + index, false)),
+    callees: notes.callees.map((node, index) => graphNodeToViewNode(node, 30 + index, false)),
+    dependents: notes.dependents.map((node, index) => graphNodeToViewNode(node, 40 + index, false)),
+    dependencies: notes.dependencies.map((node, index) => graphNodeToViewNode(node, 50 + index, false)),
     limit: notes.limit,
     omitted: notes.omitted,
   };
-}
-
-function formatNoteNode(
-  node: GraphNode,
-  pathRefs: AgentPathRefs,
-  nodeRefs: Map<string, string>,
-  expandedNodeIds: Set<string>,
-): Record<string, unknown> {
-  const id = nodeRefs.get(node.id);
-  if (id && expandedNodeIds.has(node.id)) {
-    return { id };
-  }
-  return formatGraphNode(node, pathRefs, nodeRefs);
-}
-
-function formatSource(source: SourceWindowPayload, pathRefs: AgentPathRefs): Record<string, unknown> {
-  return removeUndefined({
-    path: source.filePath ? pathRefs.pathToRef[source.filePath] : null,
-    start: source.startLine,
-    end: source.endLine,
-    text: source.text,
-    missing: source.missing,
-  });
-}
-
-function createNodeRefs(nodes: GraphNode[]): Map<string, string> {
-  return new Map(nodes.map((node, index) => [node.id, `n${index + 1}`]));
-}
-
-function isGraphNode(value: GraphNode | FilePayloadTarget): value is GraphNode {
-  return "id" in value;
 }
 
 function relationshipNotesForNodes(graph: GraphDatabase, nodes: GraphNode[]): RawRelationshipNotes {
@@ -525,27 +472,6 @@ function clampInteger(value: number, min: number, max: number): number {
     return min;
   }
   return Math.max(min, Math.min(max, Math.trunc(value)));
-}
-
-function uniqueNodes(nodes: GraphNode[]): GraphNode[] {
-  const seen = new Set<string>();
-  return nodes.filter((node) => {
-    if (seen.has(node.id)) {
-      return false;
-    }
-    seen.add(node.id);
-    return true;
-  });
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter((value) => value.length > 0))];
-}
-
-function removeUndefined<T extends Record<string, unknown>>(value: T): T {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
-  ) as T;
 }
 
 function optionalNumber(args: Record<string, unknown>, key: string): number | null {

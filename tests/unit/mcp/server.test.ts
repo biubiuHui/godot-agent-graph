@@ -42,6 +42,23 @@ describe("MCP server wiring", () => {
       "offset",
       "limit",
       "includeCode",
+      "includeNotes",
+      "symbolsOnly",
+    ]));
+  });
+
+  it("keeps godot_node listed schema aligned with handler options", () => {
+    const nodeTool = listGodotMcpTools().find((tool) => tool.name === "godot_node");
+
+    expect(Object.keys(nodeTool?.inputSchema.properties ?? {})).toEqual(expect.arrayContaining([
+      "projectPath",
+      "id",
+      "symbol",
+      "file",
+      "offset",
+      "limit",
+      "includeCode",
+      "includeNotes",
       "symbolsOnly",
     ]));
   });

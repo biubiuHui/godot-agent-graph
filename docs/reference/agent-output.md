@@ -27,9 +27,12 @@ The agent-facing output is implemented in these modules:
 
 | Path | Responsibility |
 | --- | --- |
-| `src/context/agent-output.ts` | Formats graph context into compact node, path, relationship, snippet, budget, and omitted-count fields. |
-| `src/context/explore.ts` | Builds ranked `godot_context` input from search, graph neighbors, source snippets, path links, and optional blast-radius data. |
-| `src/context/node-payload.ts` | Builds exact `godot_node` reads for files, symbols, and graph node ids. |
+| `src/context/explore.ts` | Selects ranked `godot_context` facts from search, graph neighbors, source snippets, path links, and optional blast-radius data. It does not create compact aliases. |
+| `src/context/node-payload.ts` | Locates exact `godot_node` targets and source windows for files, symbols, and graph node ids. It does not own compact path or node references. |
+| `src/context/output-view.ts` | Converts selected context or node-read facts into the shared `AgentOutputView`. |
+| `src/context/output-budget.ts` | Applies count and character budgets to the view before compact references exist. |
+| `src/context/output-finalize.ts` | Builds `paths`, `prefixes`, compact node ids, selectors, relationship endpoints, and output invariants from the budgeted visible view. |
+| `src/context/agent-output.ts` | Compatibility facade for `formatAgentContext()`. |
 | `src/mcp/tools.ts` | Defines the MCP surface and adapts status, context, node, and sync payloads to compact JSON. |
 | `src/db/queries.ts` | Provides graph node/file lookup, search token handling, relationship rows, and symbol-reference data. |
 
@@ -83,6 +86,8 @@ The default MCP tools are intentionally small:
 
 `paths` stores each returned Godot path once. Nodes, snippets, blast-radius check files, and scene summaries refer back to these short ids. When several paths share a long directory prefix, `prefixes` can replace that shared prefix with an alias such as `@p1`.
 
+Compact references are finalized only after selection and budgeting. A node, snippet, relationship endpoint, stale file, or selector that is not visible in the final payload cannot contribute a `paths`, `prefixes`, or `selectors` entry.
+
 `id` is a response-local compact node id. For follow-up source reads, expand the node `path` through `paths[pN]` and call `godot_node` with `file` plus `symbol` from the node `name` or `qname`. `selectors` appears only for nodes that cannot be identified cleanly by `file + symbol`; when needed, rebuild the raw graph id from the selector parts or use its explicit `id`.
 
 ## Relationship Format
@@ -119,7 +124,7 @@ Resource nodes include `.tres` property metadata. For resource-heavy tasks, quer
 { "id": "script:res://scripts/fixture_actor.gd" }
 ```
 
-File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source. Relationship notes are bounded; use `notes.omitted` to tell whether more relationships exist outside the response.
+File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source. `includeNotes: false` keeps the target/source payload and omits relationship notes for focused source reads. Relationship notes are bounded; use `notes.omitted` to tell whether more relationships exist outside the response.
 
 `godot_node` output also uses compact paths and node ids:
 
@@ -157,7 +162,7 @@ Agent output uses hard response budgets to avoid large payloads:
 | --- | --- |
 | `godot_context` | `4800` estimated JSON characters |
 
-When a payload exceeds its budget, lower-priority snippets are dropped first, then relationships, then nodes. The response sets `truncated: true` and increments `omitted` counts so an agent can decide whether to ask a narrower graph question.
+When a payload exceeds its budget, lower-priority snippets are dropped first, then lower-priority relationships, then unprotected nodes. Entry points, visible relationship endpoints, and focused `pathsBetween` endpoints are protected as long as the response can still fit. The response sets `truncated: true` and increments `omitted` counts so an agent can decide whether to ask a narrower graph question.
 
 ## Freshness Contract
 

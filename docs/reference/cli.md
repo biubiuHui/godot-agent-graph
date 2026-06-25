@@ -82,6 +82,7 @@ gdgraph node --path <path> --symbol shared_name --file res://scripts/example.gd
 gdgraph node --path <path> --id script:res://scripts/fixture_actor.gd
 gdgraph node --path <path> --file res://scripts/fixture_actor.gd --offset 1 --limit 80
 gdgraph node --path <path> --symbol FixtureActor --no-code
+gdgraph node --path <path> --file res://scripts/fixture_actor.gd --limit 80 --no-notes
 gdgraph node --path <path> --id script:res://scripts/fixture_actor.gd --symbols-only
 ```
 

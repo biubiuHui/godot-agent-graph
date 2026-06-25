@@ -121,6 +121,10 @@ gdgraph serve --mcp /path/to/godot/project
 3. 如果 `initialized` 是 `false` 或 `indexEmpty` 是 `true`，先手动调用一次 `godot_sync`，再重试 `godot_context`。
 4. 如果 `indexFresh` 是 `false`，先用 `godot_status` 看完整 pending 文件列表，或直接调用 `godot_sync`。
 
+只想读一个源码片段时，对 `godot_node` 传 `includeNotes: false`，避免关系摘要挤占上下文。
+
+`paths`、`selectors` 和紧凑 `nN` 节点 id 只会从预算后的可见输出生成；被 `omitted` 裁掉的节点、关系、片段和 note-only 路径不会留下多余 alias。
+
 `godot_context.query` 应写成短关键词/符号查询，不要写成自然语言任务。优先使用准确类名、方法名、常量名、字段名、资源路径、文件/路径片段和领域名词。
 
 查询资源时，建议带上 `resources/definitions` 这类路径片段，以及 `.tres` 中的属性名或字符串值。资源 metadata 会参与图谱搜索，但 `godot_context` 仍然是有边界的导航结果，不是完整资源审计。
@@ -148,6 +152,7 @@ This project uses `gdgraph` for indexed Godot structure.
 
 - For Godot scripts, scenes, resources, signals, node paths, or call chains, use the `godot-graph-navigation` skill when available.
 - If the skill is unavailable, call `godot_context` before broad file search, then use `godot_node` for indexed source reads.
+- For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
 - If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 ```
 
@@ -158,6 +163,7 @@ gdgraph sync /path/to/godot/project
 gdgraph context FixtureActor --path /path/to/godot/project
 gdgraph node --path /path/to/godot/project --symbol FixtureActor
 gdgraph node --path /path/to/godot/project --file res://scripts/fixture_actor.gd --limit 80
+gdgraph node --path /path/to/godot/project --file res://scripts/fixture_actor.gd --limit 80 --no-notes
 ```
 
 ## 索引内容

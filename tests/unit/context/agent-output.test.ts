@@ -1,8 +1,158 @@
 import { describe, expect, it } from "vitest";
 
 import { formatAgentContext } from "../../../src/context/agent-output.js";
+import { applyOutputBudget } from "../../../src/context/output-budget.js";
+import { finalizeAgentOutput } from "../../../src/context/output-finalize.js";
+import { contextToOutputView, nodeReadToOutputView } from "../../../src/context/output-view.js";
+
+function node(
+  id: string,
+  kind: string,
+  name: string,
+  filePath: string | null,
+  signature: string | null = null,
+) {
+  return {
+    id,
+    kind,
+    name,
+    qualifiedName: name,
+    filePath,
+    startLine: 1,
+    signature,
+  };
+}
+
+function viewNode(id: string, kind: string, name: string, filePath: string) {
+  return {
+    graphId: id,
+    kind,
+    name,
+    qualifiedName: name,
+    filePath,
+    startLine: 1,
+    signature: null,
+    priority: 0,
+    protected: true,
+  };
+}
 
 describe("agent output formatter", () => {
+  it("keeps output view selection separate from final compact references", () => {
+    const view = contextToOutputView({
+      query: "Visible",
+      nodes: [
+        node("script:res://scripts/visible.gd", "script_class", "Visible", "res://scripts/visible.gd"),
+      ],
+      relationships: [
+        "script:res://scripts/visible.gd calls method:res://scripts/visible.gd:run (resolver)",
+      ],
+      snippets: [],
+      maxChars: 8_000,
+    });
+
+    expect(view.kind).toBe("context");
+    expect(view.nodes[0]).toEqual(expect.objectContaining({
+      graphId: "script:res://scripts/visible.gd",
+      protected: true,
+    }));
+    expect(view.relationships[0]).toEqual(expect.objectContaining({
+      source: "script:res://scripts/visible.gd",
+      kind: "calls",
+      target: "method:res://scripts/visible.gd:run",
+      provenance: "resolver",
+    }));
+    expect(JSON.stringify(view)).not.toContain("\"paths\"");
+    expect(JSON.stringify(view)).not.toContain("\"selectors\"");
+  });
+
+  it("budgets the view before finalizing compact paths and selectors", () => {
+    const view = contextToOutputView({
+      query: "Visible",
+      nodes: [
+        node("script:res://scripts/visible.gd", "script_class", "Visible", "res://scripts/visible.gd"),
+      ],
+      relationships: [
+        "script:res://scripts/visible.gd calls method:res://scripts/kept.gd:run (resolver)",
+        "script:res://scripts/visible.gd calls method:res://scripts/hidden.gd:run (resolver)",
+      ],
+      snippets: [
+        {
+          filePath: "res://scripts/hidden_snippet.gd",
+          startLine: 1,
+          endLine: 1,
+          text: "hidden",
+        },
+      ],
+      maxChars: 8_000,
+    });
+
+    const budgeted = applyOutputBudget(view, {
+      maxNodes: 1,
+      maxRelationships: 1,
+      maxSnippets: 0,
+      maxChars: 8_000,
+    });
+    const output = finalizeAgentOutput(budgeted);
+    const serialized = JSON.stringify(output);
+
+    expect(output.omitted).toEqual({
+      nodes: 0,
+      relationships: 1,
+      snippets: 1,
+    });
+    expect(output.truncated).toBe(true);
+    expect(serialized).toContain("kept.gd");
+    expect(serialized).not.toContain("hidden.gd");
+    expect(serialized).not.toContain("hidden_snippet.gd");
+  });
+
+  it("finalizes node reads without note-only path references", () => {
+    const output = finalizeAgentOutput(nodeReadToOutputView({
+      target: viewNode(
+        "script:res://scripts/fixture_actor.gd",
+        "script_class",
+        "FixtureActor",
+        "res://scripts/fixture_actor.gd",
+      ),
+      symbols: [
+        viewNode(
+          "method:res://scripts/fixture_actor.gd:_ready",
+          "method",
+          "_ready",
+          "res://scripts/fixture_actor.gd",
+        ),
+      ],
+      source: {
+        filePath: "res://scripts/fixture_actor.gd",
+        startLine: 1,
+        endLine: 2,
+        text: "1\textends Node\n2\tclass_name FixtureActor",
+      },
+      staleFilePaths: [],
+      maxChars: 8_000,
+    }));
+
+    expect(output).toEqual(expect.objectContaining({
+      ok: true,
+      paths: {
+        p1: "res://scripts/fixture_actor.gd",
+      },
+      target: expect.objectContaining({
+        id: "n1",
+        path: "p1",
+      }),
+      symbols: [
+        expect.objectContaining({
+          id: "n2",
+          path: "p1",
+        }),
+      ],
+    }));
+    expect(output).not.toHaveProperty("notes");
+    expect(JSON.stringify(output)).not.toContain("autoload_fixture.gd");
+  });
+
   it("interns paths and graph node ids into compact agent context", () => {
     const input = {
       query: "TargetPanel",
@@ -319,6 +469,106 @@ describe("agent output formatter", () => {
     expect(JSON.stringify(output)).not.toContain("script:res://scripts/omitted.gd");
   });
 
+  it("prunes paths for nodes omitted from the formatted output", () => {
+    const output = formatAgentContext(
+      {
+        query: "Visible",
+        nodes: [
+          {
+            id: "script:res://scripts/visible.gd",
+            kind: "script_class",
+            name: "Visible",
+            qualifiedName: "Visible",
+            filePath: "res://scripts/visible.gd",
+            startLine: 1,
+            signature: null,
+          },
+          ...Array.from({ length: 5 }, (_, index) => ({
+            id: `resource:res://resources/noise_${index}.tres`,
+            kind: "resource",
+            name: `noise_${index}.tres`,
+            qualifiedName: `res://resources/noise_${index}.tres`,
+            filePath: `res://resources/noise_${index}.tres`,
+            startLine: 1,
+            signature: "Resource",
+          })),
+        ],
+        relationships: [],
+        files: ["res://scripts/visible.gd"],
+        snippets: [],
+      },
+      {
+        maxNodes: 1,
+        maxRelationships: 10,
+        maxSnippets: 10,
+        maxChars: 8_000,
+      },
+    );
+
+    expect(output.nodes).toHaveLength(1);
+    expect(output.omitted.nodes).toBe(5);
+    expect(output.paths).toEqual({
+      p1: "res://scripts/visible.gd",
+    });
+    expect(JSON.stringify(output)).not.toContain("resources/noise_");
+  });
+
+  it("prunes selectors and paths for relationships omitted by output limits", () => {
+    const output = formatAgentContext(
+      {
+        query: "Visible",
+        nodes: [
+          {
+            id: "script:res://scripts/visible.gd",
+            kind: "script_class",
+            name: "Visible",
+            qualifiedName: "Visible",
+            filePath: "res://scripts/visible.gd",
+            startLine: 1,
+            signature: null,
+          },
+        ],
+        relationships: [
+          "script:res://scripts/visible.gd calls method:res://scripts/kept.gd:run (resolver)",
+          "script:res://scripts/visible.gd calls method:res://scripts/hidden_one.gd:run (resolver)",
+          "script:res://scripts/visible.gd calls method:res://scripts/hidden_two.gd:run (resolver)",
+        ],
+        files: ["res://scripts/visible.gd"],
+        snippets: [],
+      },
+      {
+        maxNodes: 1,
+        maxRelationships: 1,
+        maxSnippets: 10,
+        maxChars: 8_000,
+      },
+    );
+
+    expect(output.relationships).toEqual([
+      {
+        from: "n1",
+        kind: "calls",
+        to: "n2",
+        provenance: "resolver",
+      },
+    ]);
+    expect(output.omitted.relationships).toBe(2);
+    expect(output.paths).toEqual({
+      p1: "@p1/visible.gd",
+      p2: "@p1/kept.gd",
+    });
+    expect(output.selectors).toEqual({
+      n2: {
+        kind: "method",
+        path: "p2",
+        suffix: "run",
+      },
+    });
+    const serialized = JSON.stringify(output);
+    expect(serialized).not.toContain("hidden_one");
+    expect(serialized).not.toContain("hidden_two");
+  });
+
   it("uses path refs for unresolved resource path targets", () => {
     const output = formatAgentContext({
       query: "SampleResource",
@@ -353,6 +603,24 @@ describe("agent output formatter", () => {
       },
     ]);
     expect(JSON.stringify(output.relationships)).not.toContain("res://resources/sample_profile.tres");
+  });
+
+  it("keeps unparsable relationship text as a related target", () => {
+    const output = formatAgentContext({
+      query: "Fixture",
+      nodes: [],
+      relationships: ["unstructured relationship text"],
+      files: [],
+      snippets: [],
+    });
+
+    expect(output.relationships).toEqual([
+      {
+        kind: "related",
+        target: "unstructured relationship text",
+        provenance: "text",
+      },
+    ]);
   });
 
   it("preserves focused relationships before lower-value nodes when truncated", () => {

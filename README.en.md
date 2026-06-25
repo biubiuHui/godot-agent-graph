@@ -121,6 +121,10 @@ Recommended agent flow:
 3. If `initialized` is `false` or `indexEmpty` is `true`, call `godot_sync` manually once, then retry `godot_context`.
 4. If `indexFresh` is `false`, call `godot_status` for the full pending file list or call `godot_sync` directly.
 
+For focused source slices, pass `includeNotes: false` to `godot_node` so relationship summaries do not crowd out source.
+
+`paths`, `selectors`, and compact `nN` node ids are generated only from the budgeted visible output. Nodes, relationships, snippets, and note-only paths removed by `omitted` counts do not leave extra aliases behind.
+
 Write `godot_context.query` as a short keyword and identifier query, not a natural-language task. Prefer exact class names, methods, constants, fields, resource paths, file/path fragments, and domain nouns.
 
 For resource-heavy questions, include path fragments such as `resources/definitions` plus `.tres` property names or string values. Resource metadata participates in graph search, but `godot_context` is still a bounded navigation result, not a complete resource audit.
@@ -148,6 +152,7 @@ This project uses `gdgraph` for indexed Godot structure.
 
 - For Godot scripts, scenes, resources, signals, node paths, or call chains, use the `godot-graph-navigation` skill when available.
 - If the skill is unavailable, call `godot_context` before broad file search, then use `godot_node` for indexed source reads.
+- For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
 - If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 ```
 
@@ -158,6 +163,7 @@ gdgraph sync /path/to/godot/project
 gdgraph context FixtureActor --path /path/to/godot/project
 gdgraph node --path /path/to/godot/project --symbol FixtureActor
 gdgraph node --path /path/to/godot/project --file res://scripts/fixture_actor.gd --limit 80
+gdgraph node --path /path/to/godot/project --file res://scripts/fixture_actor.gd --limit 80 --no-notes
 ```
 
 ## Indexed Data

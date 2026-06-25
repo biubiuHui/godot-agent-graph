@@ -95,6 +95,38 @@ afterEach(() => {
 });
 
 describe("agent context queries", () => {
+  it("returns selection facts without final output aliases", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/fixture_actor.gd");
+      addNode(
+        graph,
+        "script:res://scripts/fixture_actor.gd",
+        "script_class",
+        "FixtureActor",
+        "FixtureActor",
+        "res://scripts/fixture_actor.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "FixtureActor",
+        includeCode: false,
+      }) as unknown as Record<string, unknown>;
+
+      expect(context).not.toHaveProperty("paths");
+      expect(context).not.toHaveProperty("prefixes");
+      expect(context).not.toHaveProperty("selectors");
+      expect(context.nodes).toEqual([
+        expect.not.objectContaining({
+          path: expect.any(String),
+        }),
+      ]);
+    } finally {
+      graph.close();
+    }
+  });
+
   it("preserves exact entry point symbols in broad natural-language queries", () => {
     const graph = createTempGraph();
     try {
@@ -262,6 +294,87 @@ describe("agent context queries", () => {
           "res://tests/crystal_ember_cobalt_lantern_test.gd",
         ]),
       );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps exact code entry points when high-cardinality resource data also matches", () => {
+    const graph = createTempGraph();
+    try {
+      function insertResourceObjective(path: string, index: number): void {
+        const node = addNode(
+          graph,
+          `resource:${path}#Objective_${index}`,
+          "resource",
+          `Objective_${index}`,
+          `${path}#Objective_${index}`,
+          path,
+          {
+            objective_type: "board_count_at_least",
+            target_family_ids: ["ember"],
+            target_tag_ids: ["signal"],
+            count_at_least: 2,
+            composite_all: true,
+            composite_any: false,
+          },
+        );
+        addEdge(graph, `resource:${path}`, "contains", node.id);
+      }
+
+      addFile(graph, "res://resources/route_profile.tres", "resource");
+      addNode(
+        graph,
+        "resource:res://resources/route_profile.tres",
+        "resource",
+        "route_profile.tres",
+        "res://resources/route_profile.tres",
+        "res://resources/route_profile.tres",
+        {
+          properties: {
+            objective_type: "board_count_at_least",
+            count_at_least: 2,
+          },
+        },
+      );
+      for (let index = 0; index < 18; index += 1) {
+        insertResourceObjective("res://resources/route_profile.tres", index);
+      }
+      addFile(graph, "res://scripts/analysis/route_analyzer.gd");
+      addNode(
+        graph,
+        "script:res://scripts/analysis/route_analyzer.gd",
+        "script_class",
+        "RouteAnalyzer",
+        "RouteAnalyzer",
+        "res://scripts/analysis/route_analyzer.gd",
+      );
+      addNode(
+        graph,
+        "property:res://scripts/analysis/route_analyzer.gd:active_route_signal",
+        "property",
+        "active_route_signal",
+        "RouteAnalyzer.active_route_signal",
+        "res://scripts/analysis/route_analyzer.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query:
+          "RouteObjectiveData objective_type target_family_ids target_tag_ids count_at_least composite_all composite_any RouteAnalyzer active_route_signal",
+        includeCode: false,
+        maxFiles: 6,
+      });
+
+      expect(context.files).toContain("res://scripts/analysis/route_analyzer.gd");
+      expect(context.entryPoints).toEqual(
+        expect.arrayContaining([
+          "script:res://scripts/analysis/route_analyzer.gd",
+          "property:res://scripts/analysis/route_analyzer.gd:active_route_signal",
+        ]),
+      );
+      expect(context.nodes.filter((node) => node.filePath === "res://resources/route_profile.tres").length)
+        .toBeLessThanOrEqual(2);
     } finally {
       graph.close();
     }

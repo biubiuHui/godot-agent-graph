@@ -158,6 +158,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
     .option("--offset <number>", "Source line offset")
     .option("--limit <number>", "Source line limit")
     .option("--no-code", "Exclude source text")
+    .option("--no-notes", "Exclude relationship notes")
     .option("--symbols-only", "Return symbols without source text")
     .description("Read indexed source for one Godot file, symbol, or graph node")
     .action((commandOptions: {
@@ -168,6 +169,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
       offset?: string;
       limit?: string;
       code?: boolean;
+      notes?: boolean;
       symbolsOnly?: boolean;
     }) => {
       withInitializedGraphCommand(cwd, commandOptions.path, write, (graph, root) =>
@@ -178,6 +180,7 @@ export function createCliProgram(options: CliProgramOptions): Command {
           offset: optionalCliNumber(commandOptions.offset),
           limit: optionalCliNumber(commandOptions.limit),
           includeCode: commandOptions.code,
+          includeNotes: commandOptions.notes,
           symbolsOnly: commandOptions.symbolsOnly,
         }),
       );

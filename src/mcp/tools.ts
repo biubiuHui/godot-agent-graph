@@ -296,6 +296,7 @@ function nodeQuerySchema(): GodotMcpToolDefinition["inputSchema"] {
       offset: { type: "number" },
       limit: { type: "number" },
       includeCode: { type: "boolean" },
+      includeNotes: { type: "boolean", description: "Include relationship notes around the selected node or file." },
       symbolsOnly: { type: "boolean" },
     },
   };

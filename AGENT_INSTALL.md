@@ -154,6 +154,8 @@ After restart, ask the Agent to list or inspect MCP tools. It should expose:
 - For `.tres` resources, include path fragments and exported/resource property names or string values.
 - Use `godot_node` to read one indexed file, symbol, or graph node.
 - Prefer `godot_node({ file, symbol })` by expanding `context.paths[pN]` and using the node `name` or `qname`.
+- For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
+- Compact `paths`, `selectors`, and node ids come only from visible budgeted output; omitted content leaves no aliases behind.
 - Treat truncated graph output as navigation, not exhaustive proof.
 - For constants, enums, signal names, resource paths, or string protocols, add a focused `rg` or test check when complete reference proof matters.
 

@@ -10,6 +10,8 @@ Each tool accepts an optional `projectPath`. When omitted, the server project ro
 
 MCP responses are compact JSON because they are meant to be read by agents. Pretty-printed CLI/debug views should use CLI commands or lower-level APIs instead. See [Agent Output Reference](./agent-output.md) for the formatter contract, budgets, and privacy rules behind these payloads.
 
+Compact `paths`, `prefixes`, node ids, and `selectors` are derived from the final visible payload after budget limits are applied. Omitted nodes, relationships, snippets, and note-only paths do not leave alias entries behind.
+
 ## Agent-Native Default Surface
 
 The MCP server's default visible tools are:
@@ -141,7 +143,7 @@ For `.tres` resources, include directory fragments such as `resources/definition
 }
 ```
 
-Use `paths` to expand compact path ids. `entryPoints` are the ranked starting nodes for the query. Exact symbols, file paths, CamelCase terms, and snake_case terms are ranked entry candidates. `pathsBetween` highlights direct graph edges between entry points when found. `blastRadius` appears only for edit/impact-style queries and gives a compact first check-file set, not a full transitive impact report. For source follow-up, expand `paths[pN]` and call `godot_node({ file, symbol })` with the node `name` or `qname`. `selectors` appears for graph-id-only targets such as scene nodes and for relationship endpoints outside the visible `nodes[]` list. `truncated` and `omitted` tell the agent when the response stayed within budget by dropping lower-priority entries.
+Use `paths` to expand compact path ids. `entryPoints` are the ranked starting nodes for the query. Exact symbols, file paths, CamelCase terms, and snake_case terms are ranked entry candidates. `pathsBetween` highlights direct graph edges between entry points when found. `blastRadius` appears only for edit/impact-style queries and gives a compact first check-file set, not a full transitive impact report. For source follow-up, expand `paths[pN]` and call `godot_node({ file, symbol })` with the node `name` or `qname`. `selectors` appears for graph-id-only targets such as scene nodes and for visible relationship endpoints outside the visible `nodes[]` list. `truncated` and `omitted` tell the agent when the response stayed within budget by dropping lower-priority entries.
 
 `truncated:true` means the response is a navigation package, not a complete proof chain. For high-risk edits that depend on complete reference coverage, follow up with `godot_node`, a narrow `rg`, or tests.
 
@@ -156,7 +158,8 @@ Input:
   "projectPath": "/path/to/project",
   "file": "res://scripts/fixture_actor.gd",
   "offset": 1,
-  "limit": 80
+  "limit": 80,
+  "includeNotes": false
 }
 ```
 
@@ -170,7 +173,7 @@ Alternative inputs:
 { "projectPath": "/path/to/project", "id": "script:res://scripts/fixture_actor.gd" }
 ```
 
-Returns indexed source for a Godot file, graph node id, or symbol. File reads support `offset` and `limit`, and source text is returned with line numbers. Symbol and graph-node reads prefer indexed `startLine` / `endLine` ranges so methods, scene nodes, and resources return the relevant body/window instead of a file-head dump. `symbolsOnly: true` returns indexed symbols for a file without source text. `includeCode: false` omits the `source` block but still returns target metadata and relationship notes.
+Returns indexed source for a Godot file, graph node id, or symbol. File reads support `offset` and `limit`, and source text is returned with line numbers. Symbol and graph-node reads prefer indexed `startLine` / `endLine` ranges so methods, scene nodes, and resources return the relevant body/window instead of a file-head dump. `symbolsOnly: true` returns indexed symbols for a file without source text. `includeCode: false` omits the `source` block but still returns target metadata and relationship notes. `includeNotes: false` omits the bounded relationship notes when the agent only needs a focused source slice.
 
 Selector rules:
 
@@ -201,7 +204,7 @@ Responses include concise relationship notes:
 }
 ```
 
-Relationship notes are bounded summaries. Cross-file `references_symbol` evidence is prioritized ahead of local structural edges, but nonzero `notes.omitted` still means additional relationships exist outside the response. For constants, enums, signal names, resource paths, and string protocols, use a narrow `rg` or tests when exhaustive impact proof matters.
+Relationship notes are bounded summaries. Cross-file `references_symbol` evidence is prioritized ahead of local structural edges, but nonzero `notes.omitted` still means additional relationships exist outside the response. Use `includeNotes: false` for focused file-window reads where source text matters more than surrounding relationships. For constants, enums, signal names, resource paths, and string protocols, use a narrow `rg` or tests when exhaustive impact proof matters.
 
 If a relationship note points to a node already expanded in `target` or `symbols[]`, the note may be just `{ "id": "nN" }`. Resolve that id against the expanded target or symbol entry.
 
