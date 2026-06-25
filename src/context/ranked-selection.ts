@@ -53,8 +53,14 @@ function selectResourceSeeds(plan: ContextQueryPlan, pools: ContextCandidatePool
 }
 
 function selectSymbolSeeds(pools: ContextCandidatePools): GraphNode[] {
+  if (pools.symbolExact.length > 0) {
+    return limitSeeds(uniqueNodes([
+      ...pools.symbolExact,
+      ...pools.resourceMetadata,
+    ]));
+  }
+
   return limitSeeds(uniqueNodes([
-    ...pools.symbolExact,
     ...pools.symbolText.filter((node) => node.kind !== "resource"),
     ...pools.resourceMetadata,
     ...pools.fallbackText,

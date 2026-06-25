@@ -209,6 +209,37 @@ describe("ranked context seed selection", () => {
     ]);
   });
 
+  it("keeps exact symbol queries from seeding broad text-only symbol matches", () => {
+    const plan = buildQueryPlan("change target_method");
+    const targetMethod = makeNode(
+      "method:res://scripts/target_service.gd:target_method",
+      "method",
+      "target_method",
+      "res://scripts/target_service.gd",
+    );
+    const unrelatedMethod = makeNode(
+      "method:res://scripts/unrelated_service.gd:unrelated_method",
+      "method",
+      "unrelated_method",
+      "res://scripts/unrelated_service.gd",
+    );
+
+    const selection = selectRankedSeeds(
+      plan,
+      emptyPools({
+        symbolExact: [targetMethod],
+        symbolText: [unrelatedMethod],
+        fallbackText: [unrelatedMethod],
+      }),
+      null,
+    );
+
+    expect(selection.strategy).toBe("symbol-first");
+    expect(selection.seeds.map((node) => node.id)).toEqual([
+      "method:res://scripts/target_service.gd:target_method",
+    ]);
+  });
+
   it("selects relationship candidates with graph evidence before text-only candidates", () => {
     const plan = buildQueryPlan("dependents FixtureLimit references");
     const limit = makeNode(

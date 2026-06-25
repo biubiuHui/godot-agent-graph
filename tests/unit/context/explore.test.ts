@@ -306,6 +306,170 @@ describe("agent context queries", () => {
     }
   });
 
+  it("keeps broad resource text queries focused on matching resource files", () => {
+    const graph = createTempGraph();
+    try {
+      function insertResource(path: string, properties: Record<string, unknown>): void {
+        addFile(graph, path, "resource");
+        addNode(
+          graph,
+          `resource:${path}`,
+          "resource",
+          path.split("/").at(-1) ?? path,
+          path,
+          path,
+          {
+            properties,
+            type: "FixtureItemData",
+          },
+          {
+            addressKind: "resource_main",
+            ownerPath: path,
+            readablePath: path,
+            displayPath: path,
+            referencePath: null,
+          },
+        );
+      }
+
+      function insertProperty(name: string, owner: string, path: string): void {
+        addFile(graph, path);
+        addNode(graph, `script:${path}`, "script_class", owner, owner, path);
+        addNode(graph, `property:${path}:${name}`, "property", name, `${owner}.${name}`, path);
+      }
+
+      insertResource("res://resources/items/fixture_item_alpha.tres", {
+        display_name: "Amber cobalt sample",
+        description: "Quartz signal effect",
+      });
+      insertResource("res://resources/items/fixture_item_beta.tres", {
+        display_name: "Silver basalt sample",
+        description: "Copper resin effect",
+      });
+      insertResource("res://resources/items/fixture_item_gamma.tres", {
+        display_name: "Blue mineral sample",
+        description: "Granite fiber effect",
+      });
+
+      for (let index = 0; index < 8; index += 1) {
+        insertProperty("display_text", `FixtureTopicData${index}`, `res://topics/fixture_topic_${index}.gd`);
+        insertProperty("rule_text", `FixtureUiText${index}`, `res://ui/fixture_text_${index}.gd`);
+      }
+      addFile(graph, "res://tests/fixture_item_text_test.gd");
+      addNode(
+        graph,
+        "script:res://tests/fixture_item_text_test.gd",
+        "script_class",
+        "FixtureItemTextTest",
+        "FixtureItemTextTest",
+        "res://tests/fixture_item_text_test.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query:
+          "FixtureItemResource display_text rule_text resources/items fixture item amber cobalt quartz silver basalt copper resin",
+        includeCode: false,
+        maxFiles: 6,
+      });
+
+      expect(context.strategy).toBe("resource-first");
+      expect(context.files.slice(0, 3)).toEqual(
+        expect.arrayContaining([
+          "res://resources/items/fixture_item_alpha.tres",
+          "res://resources/items/fixture_item_beta.tres",
+          "res://resources/items/fixture_item_gamma.tres",
+        ]),
+      );
+      expect(context.files.slice(0, 6)).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("res://topics/"),
+          expect.stringContaining("res://ui/"),
+          expect.stringContaining("res://tests/"),
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps exact resource path queries anchored to that resource file", () => {
+    const graph = createTempGraph();
+    try {
+      function insertPool(path: string, entryPrefix: string): void {
+        addFile(graph, path, "resource");
+        addNode(
+          graph,
+          `resource:${path}`,
+          "resource",
+          path.split("/").at(-1) ?? path,
+          path,
+          path,
+          {
+            properties: {
+              entry_type: "FixturePoolEntryData",
+            },
+            type: "FixturePoolData",
+          },
+          {
+            addressKind: "resource_main",
+            ownerPath: path,
+            readablePath: path,
+            displayPath: path,
+            referencePath: null,
+          },
+        );
+        for (let index = 0; index < 3; index += 1) {
+          const entryId = `resource:${path}#${entryPrefix}_${index}`;
+          addNode(
+            graph,
+            entryId,
+            "resource",
+            `${entryPrefix}_${index}`,
+            `${path}#${entryPrefix}_${index}`,
+            path,
+            {
+              properties: {
+                payload_id: `${entryPrefix}_payload_${index}`,
+                base_weight: index + 1,
+                weight_keys: ["fixture_weight"],
+                group_keys: ["fixture_group"],
+              },
+              type: "FixturePoolEntryData",
+            },
+            {
+              addressKind: "resource_subresource",
+              ownerPath: path,
+              readablePath: null,
+              displayPath: path,
+              referencePath: null,
+            },
+          );
+          addEdge(graph, `resource:${path}`, "contains", entryId);
+        }
+      }
+
+      const targetPath = "res://resources/pools/fixture_pool_primary.tres";
+      const unrelatedPath = "res://resources/pools/fixture_pool_secondary.tres";
+      insertPool(targetPath, "primary_entry");
+      insertPool(unrelatedPath, "secondary_entry");
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: `${targetPath} payload_id base_weight weight_keys group_keys FixturePoolEntryData`,
+        includeCode: false,
+        maxFiles: 6,
+      });
+
+      expect(context.strategy).toBe("resource-first");
+      expect(context.files).toContain(targetPath);
+      expect(context.files).not.toContain(unrelatedPath);
+      expect(context.entryPoints.every((id) => !id.includes("fixture_pool_secondary"))).toBe(true);
+    } finally {
+      graph.close();
+    }
+  });
+
   it("uses resource-first strategy and keeps resource nodes ahead of weak ui noise", () => {
     const graph = createTempGraph();
     try {

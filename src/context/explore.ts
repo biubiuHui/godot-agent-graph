@@ -1,6 +1,8 @@
 import type { GraphDatabase } from "../db/index.js";
-import { searchNodes } from "../db/queries.js";
 import { collectFilePaths, sourceSnippetsForFiles, type SourceSnippet } from "./formatter.js";
+import { collectCandidatePools } from "./candidate-pools.js";
+import { buildQueryPlan, type ContextStrategy } from "./query-plan.js";
+import { selectRankedSeeds } from "./ranked-selection.js";
 import {
   explainEdge,
   explainUnresolvedRef,
@@ -16,6 +18,8 @@ import {
 } from "../graph/traversal.js";
 import type { GraphNode, UnresolvedRef } from "../types.js";
 import { addressForNode } from "../graph/node-address.js";
+
+export type { ContextStrategy } from "./query-plan.js";
 
 export interface ContextQueryOptions {
   projectRoot: string;
@@ -36,8 +40,6 @@ export interface AgentContext {
   files: string[];
   snippets: SourceSnippet[];
 }
-
-export type ContextStrategy = "resource-first" | "symbol-first" | "relationship" | "source-oriented" | "general";
 
 export interface AgentContextCompleteness {
   scope: "bounded_navigation" | "relationship_summary" | "source_window";
@@ -271,29 +273,10 @@ function focusedPathsBetween(snapshot: ReturnType<typeof loadGraphSnapshot>, ent
 }
 
 function selectContextSeeds(graph: GraphDatabase, query: string): ContextSeedSelection {
-  const strategy = classifyContextQuery(query);
-  const fullQueryMatches = searchNodes(graph, query, 10);
-  const exactTerms = extractContextTerms(query);
-  const exactTermSet = new Set(exactTerms);
-  const snapshot = strategy === "relationship" ? loadGraphSnapshot(graph) : null;
-  const candidates = uniqueNodes([
-    ...fullQueryMatches,
-    ...exactTerms.flatMap((term) => searchNodes(graph, term, 5)),
-  ]);
-
-  const ranked = candidates
-    .map((node, index) => ({
-      node,
-      index,
-      score: contextSeedScore(node, query, exactTermSet, strategy, snapshot),
-    }))
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map((item) => item.node);
-
-  return {
-    strategy,
-    seeds: diversifyContextSeeds(ranked, exactTermSet, strategy),
-  };
+  const plan = buildQueryPlan(query);
+  const snapshot = plan.strategy === "relationship" ? loadGraphSnapshot(graph) : null;
+  const pools = collectCandidatePools(graph, plan);
+  return selectRankedSeeds(plan, pools, snapshot);
 }
 
 function diversifyContextSeeds(
