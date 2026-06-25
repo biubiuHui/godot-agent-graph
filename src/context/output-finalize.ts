@@ -13,6 +13,27 @@ import {
   type ViewRelationshipNoteGroups,
 } from "./output-view.js";
 
+export type AgentOutputInvariantReason =
+  | "unresolved_relationship_source"
+  | "unresolved_relationship_target"
+  | "orphan_context_path"
+  | "orphan_node_read_path";
+
+export class AgentOutputInvariantError extends Error {
+  constructor(readonly reason: AgentOutputInvariantReason) {
+    super("Agent output invariant failed");
+    this.name = "AgentOutputInvariantError";
+  }
+}
+
+export function isAgentOutputInvariantError(error: unknown): error is AgentOutputInvariantError {
+  return error instanceof AgentOutputInvariantError;
+}
+
+export function agentOutputInvariantReason(error: unknown): AgentOutputInvariantReason | null {
+  return isAgentOutputInvariantError(error) ? error.reason : null;
+}
+
 export interface AgentFormattedContext {
   query: string;
   strategy?: ContextStrategy;
@@ -542,10 +563,10 @@ function assertContextOutputInvariants(output: AgentFormattedContext): void {
   ]);
   for (const relationship of [...output.relationships, ...output.pathsBetween]) {
     if (relationship.from && !knownNodeRefs.has(relationship.from)) {
-      throw new Error(`Agent output invariant failed: unresolved relationship source ${relationship.from}`);
+      throw new AgentOutputInvariantError("unresolved_relationship_source");
     }
     if (relationship.to && !knownNodeRefs.has(relationship.to)) {
-      throw new Error(`Agent output invariant failed: unresolved relationship target ${relationship.to}`);
+      throw new AgentOutputInvariantError("unresolved_relationship_target");
     }
   }
 
@@ -560,7 +581,7 @@ function assertContextOutputInvariants(output: AgentFormattedContext): void {
 
   for (const pathRef of Object.keys(output.paths)) {
     if (!usedPathRefs.has(pathRef)) {
-      throw new Error(`Agent output invariant failed: orphan path ${pathRef}`);
+      throw new AgentOutputInvariantError("orphan_context_path");
     }
   }
 }
@@ -578,7 +599,7 @@ function assertNodeReadOutputInvariants(output: AgentFormattedNodeRead): void {
 
   for (const pathRef of Object.keys(output.paths)) {
     if (!usedPathRefs.has(pathRef)) {
-      throw new Error(`Agent output invariant failed: orphan node-read path ${pathRef}`);
+      throw new AgentOutputInvariantError("orphan_node_read_path");
     }
   }
 }

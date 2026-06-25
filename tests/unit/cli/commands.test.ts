@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCliProgram } from "../../../src/cli/index.js";
+import { cliCommandErrorPayload, createCliProgram } from "../../../src/cli/index.js";
+import { AgentOutputInvariantError } from "../../../src/context/output-finalize.js";
 
 const fixturesRoot = fileURLToPath(new URL("../../fixtures/godot", import.meta.url));
 const tempRoots: string[] = [];
@@ -56,6 +57,20 @@ afterEach(() => {
 });
 
 describe("gdgraph CLI commands", () => {
+  it("maps output invariant errors to compact CLI JSON payloads", () => {
+    const payload = cliCommandErrorPayload(new AgentOutputInvariantError("orphan_node_read_path"));
+    const serialized = JSON.stringify(payload);
+
+    expect(payload).toEqual({
+      ok: false,
+      error: "agent_output_invariant",
+      reason: "orphan_node_read_path",
+    });
+    expect(serialized).not.toContain("Agent output invariant failed");
+    expect(serialized).not.toContain("filePath");
+    expect(serialized).not.toContain("graphId");
+  });
+
   it("prints final top-level help without legacy commands", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];

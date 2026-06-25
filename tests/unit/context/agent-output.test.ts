@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { formatAgentContext } from "../../../src/context/agent-output.js";
 import { applyOutputBudget } from "../../../src/context/output-budget.js";
-import { finalizeAgentOutput } from "../../../src/context/output-finalize.js";
+import {
+  AgentOutputInvariantError,
+  agentOutputInvariantReason,
+  finalizeAgentOutput,
+  isAgentOutputInvariantError,
+} from "../../../src/context/output-finalize.js";
 import { contextToOutputView, nodeReadToOutputView } from "../../../src/context/output-view.js";
 
 function node(
@@ -51,6 +56,16 @@ function viewNode(id: string, kind: string, name: string, filePath: string) {
 }
 
 describe("agent output formatter", () => {
+  it("types output invariant errors with compact sanitized reasons", () => {
+    const error = new AgentOutputInvariantError("orphan_context_path");
+
+    expect(isAgentOutputInvariantError(error)).toBe(true);
+    expect(agentOutputInvariantReason(error)).toBe("orphan_context_path");
+    expect(error.message).toBe("Agent output invariant failed");
+    expect(error.message).not.toContain("res://");
+    expect(error.message).not.toContain("graphId");
+  });
+
   it("keeps output view selection separate from final compact references", () => {
     const view = contextToOutputView({
       query: "Visible",

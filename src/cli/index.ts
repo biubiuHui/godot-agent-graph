@@ -3,6 +3,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { formatAgentContext } from "../context/agent-output.js";
+import { agentOutputInvariantReason } from "../context/output-finalize.js";
 import { exploreGodotContext } from "../context/explore.js";
 import { getNodePayload } from "../context/node-payload.js";
 import { createGraphDatabase } from "../db/index.js";
@@ -351,6 +352,22 @@ function compactCliErrorMessage(result: SyncGodotProjectError): string {
   return redactLocalPaths(result.message);
 }
 
+export function cliCommandErrorPayload(error: unknown): Record<string, unknown> {
+  const invariantReason = agentOutputInvariantReason(error);
+  if (invariantReason) {
+    return {
+      ok: false,
+      error: "agent_output_invariant",
+      reason: invariantReason,
+    };
+  }
+
+  return {
+    ok: false,
+    error: redactLocalPaths(error instanceof Error ? error.message : String(error)),
+  };
+}
+
 function overviewSummary(graph: ReturnType<typeof createGraphDatabase>): Record<string, unknown> {
   const overview = getProjectOverview(graph);
   return {
@@ -397,7 +414,14 @@ function withInitializedGraphCommand(
   }
 
   withGraph(root, (graph) => {
-    writeJson(write, callback(graph, root));
+    try {
+      writeJson(write, callback(graph, root));
+    } catch (error) {
+      if (!agentOutputInvariantReason(error)) {
+        throw error;
+      }
+      writeJson(write, cliCommandErrorPayload(error));
+    }
   });
 }
 

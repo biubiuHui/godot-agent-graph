@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { formatAgentContext } from "../context/agent-output.js";
+import { agentOutputInvariantReason } from "../context/output-finalize.js";
 import { exploreGodotContext } from "../context/explore.js";
 import { getNodePayload } from "../context/node-payload.js";
 import { isSqliteLockError } from "../db/errors.js";
@@ -101,12 +102,26 @@ export function callGodotMcpTool(
     logMcpError("tool_failed", error, {
       tool: name,
     });
-    return jsonToolResult({
-      ok: false,
-      tool: name,
-      error: errorMessage(error),
-    });
+    return jsonToolResult(mcpToolErrorPayload(name, error));
   }
+}
+
+export function mcpToolErrorPayload(tool: string, error: unknown): Record<string, unknown> {
+  const invariantReason = agentOutputInvariantReason(error);
+  if (invariantReason) {
+    return {
+      ok: false,
+      tool,
+      error: "agent_output_invariant",
+      reason: invariantReason,
+    };
+  }
+
+  return {
+    ok: false,
+    tool,
+    error: errorMessage(error),
+  };
 }
 
 function lockedGraphPayload(): Record<string, unknown> {

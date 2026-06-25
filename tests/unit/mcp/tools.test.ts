@@ -7,8 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createGraphDatabase } from "../../../src/db/index.js";
 import { indexGodotProject } from "../../../src/indexer/indexer.js";
+import { AgentOutputInvariantError } from "../../../src/context/output-finalize.js";
 import { getMcpInstructions } from "../../../src/mcp/instructions.js";
-import { callGodotMcpTool, listGodotMcpTools } from "../../../src/mcp/tools.js";
+import { callGodotMcpTool, listGodotMcpTools, mcpToolErrorPayload } from "../../../src/mcp/tools.js";
 import { globalPendingFileTracker } from "../../../src/sync/watcher.js";
 
 const fixturesRoot = fileURLToPath(new URL("../../fixtures/godot", import.meta.url));
@@ -48,6 +49,24 @@ afterEach(() => {
 });
 
 describe("MCP Godot tools", () => {
+  it("maps output invariant errors to compact MCP payloads", () => {
+    const payload = mcpToolErrorPayload(
+      "godot_context",
+      new AgentOutputInvariantError("orphan_context_path"),
+    );
+    const serialized = JSON.stringify(payload);
+
+    expect(payload).toEqual({
+      ok: false,
+      tool: "godot_context",
+      error: "agent_output_invariant",
+      reason: "orphan_context_path",
+    });
+    expect(serialized).not.toContain("Agent output invariant failed");
+    expect(serialized).not.toContain("filePath");
+    expect(serialized).not.toContain("graphId");
+  });
+
   it("provides graph-first agent instructions", () => {
     const instructions = getMcpInstructions();
 
