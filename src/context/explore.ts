@@ -26,6 +26,8 @@ export interface ContextQueryOptions {
 
 export interface AgentContext {
   query: string;
+  strategy: ContextStrategy;
+  completeness: AgentContextCompleteness;
   entryPoints: string[];
   pathsBetween: string[];
   blastRadius?: AgentBlastRadius;
@@ -35,10 +37,22 @@ export interface AgentContext {
   snippets: SourceSnippet[];
 }
 
+export type ContextStrategy = "resource-first" | "symbol-first" | "relationship" | "source-oriented" | "general";
+
+export interface AgentContextCompleteness {
+  scope: "bounded_navigation" | "relationship_summary" | "source_window";
+  complete: boolean;
+}
+
 export interface AgentBlastRadius {
   entryPoints: string[];
   checkFiles: string[];
   relationshipCount: number;
+}
+
+interface ContextSeedSelection {
+  strategy: ContextStrategy;
+  seeds: GraphNode[];
 }
 
 export interface AgentNodeSummary {
@@ -86,17 +100,18 @@ export function exploreGodotContext(
   graph: GraphDatabase,
   options: ContextQueryOptions & { query: string },
 ): AgentContext {
-  const seeds = selectContextSeeds(graph, options.query);
-  return contextFromSeeds(graph, options.projectRoot, options.query, seeds, options);
+  const selection = selectContextSeeds(graph, options.query);
+  return contextFromSeeds(graph, options.projectRoot, options.query, selection, options);
 }
 
 function contextFromSeeds(
   graph: GraphDatabase,
   projectRoot: string,
   query: string,
-  seeds: GraphNode[],
+  selection: ContextSeedSelection,
   options: ContextQueryOptions,
 ): AgentContext {
+  const { seeds, strategy } = selection;
   const snapshot = loadGraphSnapshot(graph);
   const related: GraphNode[] = [...seeds];
   const relationships: string[] = [];
@@ -124,7 +139,7 @@ function contextFromSeeds(
     }
   }
 
-  return finalizeContext(projectRoot, query, related, relationships, entryPointIds, pathsBetween, options);
+  return finalizeContext(projectRoot, query, strategy, related, relationships, entryPointIds, pathsBetween, options);
 }
 
 function reverseUnresolvedRefsForSeed(
@@ -158,6 +173,7 @@ function uniqueUnresolvedRefs(refs: UnresolvedRef[]): UnresolvedRef[] {
 function finalizeContext(
   projectRoot: string,
   query: string,
+  strategy: ContextStrategy,
   nodes: GraphNode[],
   relationships: string[],
   entryPointIds: Set<string>,
@@ -170,6 +186,8 @@ function finalizeContext(
   const entryPoints = [...entryPointIds].filter((id) => visibleNodeIds.has(id));
   return {
     query,
+    strategy,
+    completeness: completenessForStrategy(strategy),
     entryPoints,
     pathsBetween,
     ...(isEditIntent(query)
@@ -195,6 +213,50 @@ function isEditIntent(query: string): boolean {
   return /\b(edit|change|modify|impact|refactor|delete|rename|fix)\b/i.test(query);
 }
 
+function completenessForStrategy(strategy: ContextStrategy): AgentContextCompleteness {
+  if (strategy === "relationship") {
+    return {
+      scope: "relationship_summary",
+      complete: false,
+    };
+  }
+
+  if (strategy === "source-oriented") {
+    return {
+      scope: "source_window",
+      complete: false,
+    };
+  }
+
+  return {
+    scope: "bounded_navigation",
+    complete: false,
+  };
+}
+
+function classifyContextQuery(query: string): ContextStrategy {
+  if (/\b(dependents?|dependencies|references?|refs?|callers?|callees?|impact)\b/i.test(query)) {
+    return "relationship";
+  }
+
+  if (/\bres:\/\/[^\s"',)]+\.gd\b|\b(offset|source|snippet|window)\b/i.test(query)) {
+    return "source-oriented";
+  }
+
+  if (
+    /\bres:\/\/[^\s"',)]+\.(?:tres|res|tscn)\b|\.(?:tres|res|tscn)\b|\bresources?\b|\b(display_name|display_label|payload|weights?|metadata)\b/i
+      .test(query)
+  ) {
+    return "resource-first";
+  }
+
+  if (/[A-Z][A-Za-z0-9_]*|[A-Z0-9_]{3,}|[a-z]+_[a-z0-9_]+/.test(query)) {
+    return "symbol-first";
+  }
+
+  return "general";
+}
+
 function focusedPathsBetween(snapshot: ReturnType<typeof loadGraphSnapshot>, entryPointIds: Set<string>): string[] {
   if (entryPointIds.size < 2) {
     return [];
@@ -208,10 +270,12 @@ function focusedPathsBetween(snapshot: ReturnType<typeof loadGraphSnapshot>, ent
   return prioritizeRelationships(uniqueStrings(selected.map(explainEdge))).slice(0, 12);
 }
 
-function selectContextSeeds(graph: GraphDatabase, query: string): GraphNode[] {
+function selectContextSeeds(graph: GraphDatabase, query: string): ContextSeedSelection {
+  const strategy = classifyContextQuery(query);
   const fullQueryMatches = searchNodes(graph, query, 10);
   const exactTerms = extractContextTerms(query);
   const exactTermSet = new Set(exactTerms);
+  const snapshot = strategy === "relationship" ? loadGraphSnapshot(graph) : null;
   const candidates = uniqueNodes([
     ...fullQueryMatches,
     ...exactTerms.flatMap((term) => searchNodes(graph, term, 5)),
@@ -221,19 +285,28 @@ function selectContextSeeds(graph: GraphDatabase, query: string): GraphNode[] {
     .map((node, index) => ({
       node,
       index,
-      score: contextSeedScore(node, query, exactTermSet),
+      score: contextSeedScore(node, query, exactTermSet, strategy, snapshot),
     }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map((item) => item.node);
 
-  return diversifyContextSeeds(ranked, exactTermSet);
+  return {
+    strategy,
+    seeds: diversifyContextSeeds(ranked, exactTermSet, strategy),
+  };
 }
 
-function diversifyContextSeeds(ranked: GraphNode[], exactTerms: Set<string>): GraphNode[] {
+function diversifyContextSeeds(
+  ranked: GraphNode[],
+  exactTerms: Set<string>,
+  strategy: ContextStrategy,
+): GraphNode[] {
   const capped = capResourceSeedsPerFile(ranked);
-  const exactCodeSeeds = ranked
-    .filter((node) => isExactCodeSeed(node, exactTerms))
-    .slice(0, MAX_EXACT_CODE_SEEDS);
+  const exactCodeSeeds = strategy === "resource-first"
+    ? []
+    : ranked
+        .filter((node) => isExactCodeSeed(node, exactTerms))
+        .slice(0, MAX_EXACT_CODE_SEEDS);
 
   return uniqueNodes([
     ...capped.slice(0, EXACT_CODE_SEED_INSERT_AFTER),
@@ -298,7 +371,7 @@ function resourceNodeSort(left: GraphNode, right: GraphNode): number {
 }
 
 function resourceNodePriority(node: GraphNode): number {
-  if (node.filePath && (node.id === `resource:${node.filePath}` || node.qualifiedName === node.filePath)) {
+  if (node.addressKind === "resource_main" || (node.filePath && node.qualifiedName === node.filePath)) {
     return 0;
   }
   return 1;
@@ -317,7 +390,13 @@ function extractContextTerms(query: string): string[] {
   );
 }
 
-function contextSeedScore(node: GraphNode, query: string, exactTerms: Set<string>): number {
+function contextSeedScore(
+  node: GraphNode,
+  query: string,
+  exactTerms: Set<string>,
+  strategy: ContextStrategy,
+  snapshot: ReturnType<typeof loadGraphSnapshot> | null,
+): number {
   let score = 0;
   for (const term of exactTerms) {
     if (node.name === term || node.qualifiedName === term || node.filePath === term || node.id === term) {
@@ -360,7 +439,123 @@ function contextSeedScore(node: GraphNode, query: string, exactTerms: Set<string
     score += 40;
   }
 
-  return score + kindPriority(node.kind);
+  return score + kindPriority(node.kind) + strategySeedScore(node, query, exactTerms, strategy, snapshot);
+}
+
+function strategySeedScore(
+  node: GraphNode,
+  query: string,
+  exactTerms: Set<string>,
+  strategy: ContextStrategy,
+  snapshot: ReturnType<typeof loadGraphSnapshot> | null,
+): number {
+  if (strategy === "resource-first") {
+    return resourceFirstSeedScore(node, query, exactTerms);
+  }
+
+  if (strategy === "symbol-first") {
+    return symbolFirstSeedScore(node, exactTerms);
+  }
+
+  if (strategy === "relationship") {
+    return relationshipSeedScore(node, exactTerms, snapshot);
+  }
+
+  if (strategy === "source-oriented") {
+    return sourceOrientedSeedScore(node, query);
+  }
+
+  return 0;
+}
+
+function resourceFirstSeedScore(node: GraphNode, query: string, exactTerms: Set<string>): number {
+  let score = 0;
+  const address = addressForNode(node);
+  if (node.kind === "resource") {
+    score += 320;
+  }
+  if (isResourceAddressKind(address.kind)) {
+    score += 180;
+  }
+  if (isResourceLikePath(address.displayPath) || isResourceLikePath(address.referencePath)) {
+    score += 120;
+  }
+
+  for (const fragment of queryPathFragments(query)) {
+    if (nodePathTextForMatching(node).includes(fragment)) {
+      score += 180;
+    }
+  }
+
+  const queryTerms = weightedQueryTerms(query);
+  const nodeTerms = nodeContextTerms(node);
+  let matchedTerms = 0;
+  for (const term of queryTerms.keys()) {
+    if (nodeTerms.has(term)) {
+      matchedTerms += 1;
+    }
+  }
+  score += matchedTerms * 36;
+
+  if (node.kind !== "resource") {
+    score -= exactTermMatchesNode(node, exactTerms) ? 40 : 120;
+  }
+  if (isLikelyUiSurface(node) || isTestPath(node.filePath)) {
+    score -= exactTermMatchesNode(node, exactTerms) ? 60 : 180;
+  }
+  return score;
+}
+
+function symbolFirstSeedScore(node: GraphNode, exactTerms: Set<string>): number {
+  let score = exactTermMatchesNode(node, exactTerms) ? 260 : 0;
+  if (isSymbolNodeKind(node.kind)) {
+    score += 180;
+  }
+  if (node.kind === "resource") {
+    score -= 180;
+  }
+  if (isLikelyUiSurface(node) && !exactTermMatchesNode(node, exactTerms)) {
+    score -= 40;
+  }
+  return score;
+}
+
+function relationshipSeedScore(
+  node: GraphNode,
+  exactTerms: Set<string>,
+  snapshot: ReturnType<typeof loadGraphSnapshot> | null,
+): number {
+  const relationshipCount = snapshot ? relationshipEvidenceCount(snapshot, node) : 0;
+  let score = exactTermMatchesNode(node, exactTerms) ? 320 : -80;
+  score += Math.min(relationshipCount * 90, 360);
+  if (relationshipCount > 0 && isSymbolNodeKind(node.kind)) {
+    score += 100;
+  }
+  if (relationshipCount === 0 && !exactTermMatchesNode(node, exactTerms)) {
+    score -= 140;
+  }
+  if (node.kind === "resource") {
+    score -= 80;
+  }
+  return score;
+}
+
+function sourceOrientedSeedScore(node: GraphNode, query: string): number {
+  const loweredQuery = query.toLowerCase();
+  const address = addressForNode(node);
+  const readablePath = address.readablePath?.toLowerCase() ?? "";
+  const displayPath = address.displayPath?.toLowerCase() ?? "";
+  let score = 0;
+  if (readablePath && loweredQuery.includes(readablePath)) {
+    score += 360;
+  }
+  if (displayPath && loweredQuery.includes(displayPath)) {
+    score += 240;
+  }
+  if (!address.readablePath) {
+    score -= 80;
+  }
+  return score;
 }
 
 function weightedQueryTerms(query: string): Map<string, number> {
@@ -400,7 +595,22 @@ function queryPathFragments(query: string): string[] {
 }
 
 function nodeFilePathForMatching(node: GraphNode): string {
-  return normalizePathFragment(node.filePath ?? "");
+  return nodePathTextForMatching(node);
+}
+
+function nodePathTextForMatching(node: GraphNode): string {
+  const address = addressForNode(node);
+  return normalizePathFragment(
+    [
+      address.readablePath,
+      address.displayPath,
+      address.referencePath,
+      address.ownerPath,
+      node.filePath,
+    ]
+      .filter((path): path is string => Boolean(path))
+      .join(" "),
+  );
 }
 
 function normalizePathFragment(value: string): string {
@@ -481,6 +691,42 @@ function kindPriority(kind: string): number {
     return 10;
   }
   return 0;
+}
+
+function isResourceAddressKind(kind: GraphNode["addressKind"]): boolean {
+  return kind.startsWith("resource_");
+}
+
+function isResourceLikePath(path: string | null): boolean {
+  return path ? /\.(?:tres|res|tscn)$/i.test(path) : false;
+}
+
+function exactTermMatchesNode(node: GraphNode, exactTerms: Set<string>): boolean {
+  return exactTerms.has(node.name) ||
+    exactTerms.has(node.qualifiedName) ||
+    (node.filePath ? exactTerms.has(node.filePath) : false);
+}
+
+function isTestPath(path: string | null): boolean {
+  return path ? /(^|\/)tests?\//i.test(path) : false;
+}
+
+function isSymbolNodeKind(kind: GraphNode["kind"]): boolean {
+  return kind === "script_class" ||
+    kind === "inner_class" ||
+    kind === "method" ||
+    kind === "property" ||
+    kind === "signal";
+}
+
+function relationshipEvidenceCount(
+  snapshot: ReturnType<typeof loadGraphSnapshot>,
+  node: GraphNode,
+): number {
+  return incomingEdges(snapshot, node.id).length +
+    outgoingEdges(snapshot, node.id).length +
+    refsFrom(snapshot, node.id).length +
+    reverseUnresolvedRefsForSeed(snapshot, node).length;
 }
 
 function summarizeAgentNode(node: GraphNode): AgentNodeSummary {

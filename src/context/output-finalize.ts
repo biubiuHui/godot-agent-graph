@@ -1,4 +1,8 @@
-import type { AgentBlastRadius } from "./explore.js";
+import type {
+  AgentBlastRadius,
+  AgentContextCompleteness,
+  ContextStrategy,
+} from "./explore.js";
 import {
   relationshipEndpointIds,
   type AgentOutputView,
@@ -11,6 +15,8 @@ import {
 
 export interface AgentFormattedContext {
   query: string;
+  strategy?: ContextStrategy;
+  completeness?: AgentContextCompleteness;
   prefixes?: Record<string, string>;
   paths: Record<string, string>;
   entryPoints: string[];
@@ -109,6 +115,8 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
   ]);
   const output: AgentFormattedContext = {
     query: view.query ?? "",
+    ...(view.strategy ? { strategy: view.strategy } : {}),
+    ...(view.completeness ? { completeness: view.completeness } : {}),
     ...(Object.keys(pathRefs.prefixes).length > 0 ? { prefixes: pathRefs.prefixes } : {}),
     paths: pathRefs.paths,
     entryPoints: view.entryPointIds

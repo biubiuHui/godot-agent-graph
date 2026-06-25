@@ -78,7 +78,7 @@ function removeUnprotectedTailNode(view: AgentOutputView): boolean {
   const protectedNodeIds = protectedGraphIds(view);
   for (let index = view.nodes.length - 1; index >= 0; index -= 1) {
     const node = view.nodes[index];
-    if (!node || node.protected || protectedNodeIds.has(node.graphId)) {
+    if (!node || protectedNodeIds.has(node.graphId)) {
       continue;
     }
     view.nodes.splice(index, 1);

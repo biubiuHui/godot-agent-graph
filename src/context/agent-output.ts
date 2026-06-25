@@ -1,4 +1,9 @@
-import type { AgentBlastRadius, AgentNodeSummary } from "./explore.js";
+import type {
+  AgentBlastRadius,
+  AgentContextCompleteness,
+  AgentNodeSummary,
+  ContextStrategy,
+} from "./explore.js";
 import type { SourceSnippet } from "./formatter.js";
 import { applyOutputBudget } from "./output-budget.js";
 import {
@@ -28,6 +33,8 @@ export { createAgentPathRefs };
 
 export interface AgentContextInput {
   query: string;
+  strategy?: ContextStrategy;
+  completeness?: AgentContextCompleteness;
   entryPoints?: string[];
   pathsBetween?: string[];
   blastRadius?: AgentBlastRadius;
@@ -61,6 +68,8 @@ export function formatAgentContext(
   };
   const view = contextToOutputView({
     query: context.query,
+    strategy: context.strategy,
+    completeness: context.completeness,
     entryPoints: context.entryPoints,
     pathsBetween: context.pathsBetween,
     blastRadius: context.blastRadius,

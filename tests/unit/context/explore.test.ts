@@ -59,6 +59,7 @@ function addNode(
   qualifiedName: string,
   filePath: string,
   metadata: GraphNode["metadata"] = {},
+  overrides: Partial<GraphNode> = {},
 ): GraphNode {
   const node: GraphNode = {
     id,
@@ -76,6 +77,7 @@ function addNode(
     signature: kind,
     metadata,
     updatedAt: 1,
+    ...overrides,
   };
   upsertNode(graph, node);
   return node;
@@ -299,6 +301,308 @@ describe("agent context queries", () => {
           "res://tests/crystal_ember_cobalt_lantern_test.gd",
         ]),
       );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("uses resource-first strategy and keeps resource nodes ahead of weak ui noise", () => {
+    const graph = createTempGraph();
+    try {
+      const resourcePath = "res://resources/fixture_profile.tres";
+      addFile(graph, resourcePath, "resource");
+      addNode(
+        graph,
+        `resource:${resourcePath}`,
+        "resource",
+        "fixture_profile.tres",
+        resourcePath,
+        resourcePath,
+        {
+          properties: {
+            display_name: "Fixture Profile",
+            weight: 12,
+          },
+          type: "Resource",
+        },
+        {
+          addressKind: "resource_main",
+          ownerPath: resourcePath,
+          readablePath: resourcePath,
+          displayPath: resourcePath,
+          referencePath: null,
+        },
+      );
+      addNode(
+        graph,
+        `resource:${resourcePath}#fixture_weight_curve`,
+        "resource",
+        "fixture_weight_curve",
+        `${resourcePath}#fixture_weight_curve`,
+        resourcePath,
+        {
+          properties: {
+            display_name: "Fixture Weight Curve",
+            weight: 4,
+          },
+        },
+        {
+          addressKind: "resource_subresource",
+          ownerPath: resourcePath,
+          readablePath: null,
+          displayPath: resourcePath,
+          referencePath: null,
+        },
+      );
+      addFile(graph, "res://ui/fixture_profile_panel.gd");
+      addNode(
+        graph,
+        "script:res://ui/fixture_profile_panel.gd",
+        "script_class",
+        "FixtureProfilePanel",
+        "FixtureProfilePanel",
+        "res://ui/fixture_profile_panel.gd",
+      );
+      addFile(graph, "res://tests/fixture_profile_test.gd");
+      addNode(
+        graph,
+        "script:res://tests/fixture_profile_test.gd",
+        "script_class",
+        "FixtureProfileTest",
+        "FixtureProfileTest",
+        "res://tests/fixture_profile_test.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "fixture_profile display_name weight resources fixture",
+        includeCode: false,
+      });
+      const entryPointNames = context.entryPoints
+        .map((id) => context.nodes.find((node) => node.id === id)?.name)
+        .filter(Boolean);
+
+      expect(context.strategy).toBe("resource-first");
+      expect(context.completeness).toEqual(expect.objectContaining({
+        scope: "bounded_navigation",
+        complete: false,
+      }));
+      expect(entryPointNames.slice(0, 2)).toEqual(
+        expect.arrayContaining(["fixture_profile.tres", "fixture_weight_curve"]),
+      );
+      expect(entryPointNames.slice(0, 2)).not.toEqual(
+        expect.arrayContaining(["FixtureProfilePanel", "FixtureProfileTest"]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("uses symbol-first strategy and ranks exact symbols ahead of unrelated resources", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/fixture_actor.gd");
+      addNode(
+        graph,
+        "script:res://scripts/fixture_actor.gd",
+        "script_class",
+        "FixtureActor",
+        "FixtureActor",
+        "res://scripts/fixture_actor.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/fixture_actor.gd:apply_damage",
+        "method",
+        "apply_damage",
+        "FixtureActor.apply_damage",
+        "res://scripts/fixture_actor.gd",
+      );
+      addNode(
+        graph,
+        "signal:res://scripts/fixture_actor.gd:health_depleted",
+        "signal",
+        "health_depleted",
+        "FixtureActor.health_depleted",
+        "res://scripts/fixture_actor.gd",
+      );
+      addFile(graph, "res://resources/fixture_actor_stats.tres", "resource");
+      addNode(
+        graph,
+        "resource:res://resources/fixture_actor_stats.tres",
+        "resource",
+        "fixture_actor_stats.tres",
+        "res://resources/fixture_actor_stats.tres",
+        "res://resources/fixture_actor_stats.tres",
+        {
+          properties: {
+            display_name: "FixtureActor health resource",
+            health_depleted: false,
+          },
+        },
+        {
+          addressKind: "resource_main",
+          ownerPath: "res://resources/fixture_actor_stats.tres",
+          readablePath: "res://resources/fixture_actor_stats.tres",
+          displayPath: "res://resources/fixture_actor_stats.tres",
+          referencePath: null,
+        },
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "FixtureActor apply_damage health_depleted",
+        includeCode: false,
+      });
+      const entryPointIds = context.entryPoints.slice(0, 3);
+
+      expect(context.strategy).toBe("symbol-first");
+      expect(entryPointIds).toEqual(
+        expect.arrayContaining([
+          "script:res://scripts/fixture_actor.gd",
+          "method:res://scripts/fixture_actor.gd:apply_damage",
+          "signal:res://scripts/fixture_actor.gd:health_depleted",
+        ]),
+      );
+      expect(entryPointIds).not.toContain("resource:res://resources/fixture_actor_stats.tres");
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("uses relationship strategy and surfaces exact dependent relationships", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/fixture_rules.gd");
+      addFile(graph, "res://scripts/fixture_consumer.gd");
+      addFile(graph, "res://scripts/unrelated_fixture_source.gd");
+      addNode(
+        graph,
+        "property:res://scripts/fixture_rules.gd:FIXTURE_LIMIT",
+        "property",
+        "FIXTURE_LIMIT",
+        "FixtureRules.FIXTURE_LIMIT",
+        "res://scripts/fixture_rules.gd",
+      );
+      addNode(
+        graph,
+        "method:res://scripts/fixture_consumer.gd:apply_limit",
+        "method",
+        "apply_limit",
+        "FixtureConsumer.apply_limit",
+        "res://scripts/fixture_consumer.gd",
+      );
+      addNode(
+        graph,
+        "script:res://scripts/unrelated_fixture_source.gd",
+        "script_class",
+        "UnrelatedFixtureSource",
+        "UnrelatedFixtureSource",
+        "res://scripts/unrelated_fixture_source.gd",
+        {
+          note: "dependents references fixture limit source",
+        },
+      );
+      addEdge(
+        graph,
+        "method:res://scripts/fixture_consumer.gd:apply_limit",
+        "references_symbol",
+        "property:res://scripts/fixture_rules.gd:FIXTURE_LIMIT",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "dependents FIXTURE_LIMIT references",
+        includeCode: false,
+      });
+
+      expect(context.strategy).toBe("relationship");
+      expect(context.completeness).toEqual(expect.objectContaining({
+        scope: "relationship_summary",
+        complete: false,
+      }));
+      expect(context.relationships).toContain(
+        "method:res://scripts/fixture_consumer.gd:apply_limit references_symbol property:res://scripts/fixture_rules.gd:FIXTURE_LIMIT (resolver)",
+      );
+      expect(context.entryPoints.slice(0, 2)).toContain("property:res://scripts/fixture_rules.gd:FIXTURE_LIMIT");
+      expect(context.snippets).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("uses source-oriented strategy for exact script path queries", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/fixture_actor.gd");
+      addNode(
+        graph,
+        "script:res://scripts/fixture_actor.gd",
+        "script_class",
+        "FixtureActor",
+        "FixtureActor",
+        "res://scripts/fixture_actor.gd",
+      );
+      addFile(graph, "res://resources/fixture_actor.tres", "resource");
+      addNode(
+        graph,
+        "resource:res://resources/fixture_actor.tres",
+        "resource",
+        "fixture_actor.tres",
+        "res://resources/fixture_actor.tres",
+        "res://resources/fixture_actor.tres",
+        {},
+        {
+          addressKind: "resource_main",
+          ownerPath: "res://resources/fixture_actor.tres",
+          readablePath: "res://resources/fixture_actor.tres",
+          displayPath: "res://resources/fixture_actor.tres",
+          referencePath: null,
+        },
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "source res://scripts/fixture_actor.gd",
+        includeCode: false,
+      });
+
+      expect(context.strategy).toBe("source-oriented");
+      expect(context.completeness).toEqual(expect.objectContaining({
+        scope: "source_window",
+        complete: false,
+      }));
+      expect(context.entryPoints[0]).toBe("script:res://scripts/fixture_actor.gd");
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("uses general strategy for broad lowercase navigation queries", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/fixture_damage.gd");
+      addNode(
+        graph,
+        "method:res://scripts/fixture_damage.gd:damage",
+        "method",
+        "damage",
+        "FixtureDamage.damage",
+        "res://scripts/fixture_damage.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "damage",
+        includeCode: false,
+      });
+
+      expect(context.strategy).toBe("general");
+      expect(context.completeness).toEqual(expect.objectContaining({
+        scope: "bounded_navigation",
+        complete: false,
+      }));
+      expect(context.entryPoints).toContain("method:res://scripts/fixture_damage.gd:damage");
     } finally {
       graph.close();
     }

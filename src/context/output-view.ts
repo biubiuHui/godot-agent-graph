@@ -1,4 +1,9 @@
-import type { AgentBlastRadius, AgentNodeSummary } from "./explore.js";
+import type {
+  AgentBlastRadius,
+  AgentContextCompleteness,
+  AgentNodeSummary,
+  ContextStrategy,
+} from "./explore.js";
 import type { SourceSnippet } from "./formatter.js";
 
 export type AgentOutputKind = "context" | "node_read";
@@ -60,6 +65,8 @@ export interface ViewOmittedCounts {
 interface AgentOutputViewBase {
   kind: AgentOutputKind;
   query?: string;
+  strategy?: ContextStrategy;
+  completeness?: AgentContextCompleteness;
   entryPointIds: string[];
   pathsBetween: ViewRelationship[];
   blastRadius?: AgentBlastRadius;
@@ -111,6 +118,8 @@ export type AgentOutputView = ContextOutputView | NodeReadOutputView;
 
 export interface ContextOutputViewInput {
   query: string;
+  strategy?: ContextStrategy;
+  completeness?: AgentContextCompleteness;
   entryPoints?: string[];
   pathsBetween?: string[];
   blastRadius?: AgentBlastRadius;
@@ -141,6 +150,8 @@ export function contextToOutputView(input: ContextOutputViewInput): ContextOutpu
   return {
     kind: "context",
     query: input.query,
+    ...(input.strategy ? { strategy: input.strategy } : {}),
+    ...(input.completeness ? { completeness: input.completeness } : {}),
     entryPointIds,
     pathsBetween,
     ...(input.blastRadius ? { blastRadius: input.blastRadius } : {}),

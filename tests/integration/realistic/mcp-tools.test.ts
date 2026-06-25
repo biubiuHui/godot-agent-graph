@@ -80,6 +80,11 @@ describe("realistic Godot MCP knowledge graph tools", () => {
       expect.objectContaining({
         ok: true,
         context: expect.objectContaining({
+          strategy: "symbol-first",
+          completeness: expect.objectContaining({
+            scope: "bounded_navigation",
+            complete: false,
+          }),
           paths: expect.objectContaining({
             p1: "res://scripts/actors/fixture_actor.gd",
           }),
