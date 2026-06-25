@@ -56,7 +56,7 @@ Supported target ids are:
 
 | Target | Config written |
 | --- | --- |
-| `codex` | `~/.codex/config.toml` plus an owned project `AGENTS.md` fallback instruction block |
+| `codex` | `~/.codex/config.toml` plus an owned project `AGENTS.md` instruction block |
 | `claude` | `<project>/.mcp.json` |
 | `cursor` | `<project>/.cursor/mcp.json` |
 | `opencode` | `<project>/opencode.jsonc` or existing `<project>/opencode.json` |

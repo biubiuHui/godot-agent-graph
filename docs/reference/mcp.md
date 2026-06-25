@@ -23,7 +23,7 @@ The MCP server's default visible tools are:
 
 Use `godot_context` first for ordinary Godot understanding, flow, structure, and edit-planning tasks. Use `godot_node` whenever you would otherwise read an indexed Godot file or named symbol. Do not rebuild indexed Godot structure with broad grep/read loops. Raw file reads are only for unindexed files, files listed as stale, or external validation such as compiler/test output.
 
-`godot_context` is strategy-backed internally. The response includes `strategy` so an agent can interpret ranking, but there are no user profiles, output profiles, or old tool aliases.
+`godot_context` is strategy-backed internally. The response includes `strategy` so an agent can interpret ranking, but there are no personalization modes, alternate output modes, or old tool aliases.
 
 `godot_context` does not auto-bootstrap arbitrary `projectPath` values. For a new worktree, copied project, missing `.gdgraph/graph.db`, or empty index, call `godot_sync` manually once, then retry `godot_context`. Missing-index responses include `nextTools: [{ "tool": "godot_sync", ... }]` to make this recovery path explicit.
 

@@ -92,7 +92,7 @@ Compact references are finalized only after selection and budgeting. A node, sni
 
 `id` is a response-local compact node id. For follow-up source reads, expand the node `path` through `paths[pN]` and call `godot_node` with `file` plus `symbol` from the node `name` or `qname`. `selectors` appears only for nodes that cannot be identified cleanly by `file + symbol`; when needed, rebuild the raw graph id from the selector parts or use its explicit `id`.
 
-`strategy` records the fixed internal query strategy that ranked the response. Current values are `resource-first`, `symbol-first`, `relationship`, `source-oriented`, and `general`. This is an interpretation aid, not a user profile or output mode.
+`strategy` records the fixed internal query strategy that ranked the response. Current values are `resource-first`, `symbol-first`, `relationship`, `source-oriented`, and `general`. This is an interpretation aid, not a personalization or output mode.
 
 `completeness` describes the scope of the returned package. `complete:false` means the response is useful navigation, not exhaustive proof; ask a narrower graph question, use `godot_node`, run a narrow `rg`, or run tests when complete coverage matters.
 

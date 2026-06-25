@@ -77,7 +77,7 @@ export function uninstallCodexTarget(options: InstallerTargetOptions): Installer
       action: removedInstructions || removedSkill ? "removed" : "unchanged",
       configPath,
       message: removedInstructions
-        ? "Removed owned gdgraph Codex fallback instructions."
+        ? "Removed owned gdgraph Codex project instructions."
         : removedSkill
           ? "Removed generated gdgraph Codex global skill."
         : "No owned gdgraph Codex MCP configuration was found.",

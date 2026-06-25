@@ -42,7 +42,7 @@ gdgraph clean /path/to/godot/project
 gdgraph sync /path/to/godot/project
 ```
 
-The implementation intentionally does not keep old-index migration or fallback code.
+The implementation intentionally does not keep old-index repair code.
 
 ## Node Address Semantics
 
@@ -106,7 +106,7 @@ The public query model is intentionally small: `status`, `sync`, `context`, and 
 | `source-oriented` | Exact file/source-window follow-ups. |
 | `general` | Mixed navigation when no narrower strategy fits. |
 
-The strategy is returned as metadata so an agent can interpret ranking. It is not a user profile or plugin system.
+The strategy is returned as metadata so an agent can interpret ranking. It is not a personalization or extension system.
 
 Relationship output is bounded. `godot_context.completeness` and `godot_node.notes.complete` tell the agent whether a result is complete; omitted counts alone are not proof of exhaustiveness.
 

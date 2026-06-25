@@ -12,7 +12,7 @@ export function getMcpInstructions(): string {
     "Do not write natural-language task instructions in godot_context.query, such as find, include paths, summarize, relevant for, or tell me.",
     "Do not rebuild indexed Godot structure with broad grep/read; the graph already indexed scene, script, signal, resource, autoload, and input relationships.",
     "Use raw Read only for unindexed files or files listed as stale by graph freshness metadata.",
-    "Use godot_context strategy and completeness fields as scope signals; they are fixed query strategies, not user profiles.",
+    "Use godot_context strategy and completeness fields as scope signals; they are fixed query strategies, not personalization modes.",
     "Treat godot_context truncated=true and completeness.complete=false as bounded navigation output, not exhaustive proof of every relationship.",
     "Treat godot_node notes as exhaustive only when notes.complete=true; otherwise inspect notes.omitted and follow up narrowly.",
     "For edits involving constants, enums, signal names, resource paths, or string protocols, add a narrow rg/test check to confirm references after graph navigation.",

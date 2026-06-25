@@ -153,7 +153,7 @@ Keep this line.
     expect(readText(skillPath)).toBe("custom skill\n");
   });
 
-  it("updates the owned Codex fallback instructions without duplicating them", () => {
+  it("updates the owned Codex project instructions without duplicating them", () => {
     const homeDir = tempRoot("gdgraph-installer-home-");
     const projectRoot = tempRoot("gdgraph-installer-project-");
     const agentsPath = join(projectRoot, "AGENTS.md");
