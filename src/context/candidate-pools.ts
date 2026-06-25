@@ -5,6 +5,7 @@ import type { ContextQueryPlan } from "./query-plan.js";
 
 export interface ContextCandidatePools {
   exactPath: GraphNode[];
+  exactResourceName: GraphNode[];
   resourcePath: GraphNode[];
   resourceMetadata: GraphNode[];
   symbolExact: GraphNode[];
@@ -14,6 +15,7 @@ export interface ContextCandidatePools {
 }
 
 const EXACT_PATH_LIMIT = 80;
+const EXACT_RESOURCE_NAME_LIMIT = 40;
 const RESOURCE_PATH_LIMIT = 40;
 const METADATA_TERM_LIMIT = 12;
 const SYMBOL_TERM_LIMIT = 12;
@@ -25,6 +27,7 @@ export function collectCandidatePools(
 ): ContextCandidatePools {
   return {
     exactPath: collectExactPathCandidates(graph, plan),
+    exactResourceName: collectExactResourceNameCandidates(graph, plan),
     resourcePath: collectResourcePathCandidates(graph, plan),
     resourceMetadata: collectResourceMetadataCandidates(graph, plan),
     symbolExact: collectSymbolExactCandidates(graph, plan),
@@ -39,6 +42,15 @@ function collectExactPathCandidates(graph: GraphDatabase, plan: ContextQueryPlan
     plan.resourcePathAnchors.flatMap((anchor) =>
       searchNodes(graph, anchor, EXACT_PATH_LIMIT)
         .filter((node) => nodeMatchesPathAnchor(node, anchor))
+    ),
+  );
+}
+
+function collectExactResourceNameCandidates(graph: GraphDatabase, plan: ContextQueryPlan): GraphNode[] {
+  return uniqueNodes(
+    plan.resourceNameAnchors.flatMap((anchor) =>
+      searchNodes(graph, anchor, EXACT_RESOURCE_NAME_LIMIT)
+        .filter((node) => isResourceNode(node) && nodeMatchesResourceNameAnchor(node, anchor))
     ),
   );
 }
@@ -59,7 +71,7 @@ function collectResourceMetadataCandidates(graph: GraphDatabase, plan: ContextQu
   }
 
   return uniqueNodes(
-    [...plan.fieldTerms, ...plan.textTerms, ...plan.symbolTerms]
+    [...plan.fieldTerms, ...plan.symbolTerms, ...textRecallTerms(plan)]
       .flatMap((term) => searchNodes(graph, term, METADATA_TERM_LIMIT))
       .filter(isResourceNode),
   );
@@ -75,7 +87,7 @@ function collectSymbolExactCandidates(graph: GraphDatabase, plan: ContextQueryPl
 
 function collectSymbolTextCandidates(graph: GraphDatabase, plan: ContextQueryPlan): GraphNode[] {
   return uniqueNodes(
-    [...plan.symbolTerms, ...plan.fieldTerms, ...plan.textTerms]
+    [...plan.symbolTerms, ...plan.fieldTerms, ...textRecallTerms(plan)]
       .flatMap((term) => searchNodes(graph, term, SYMBOL_TERM_LIMIT))
       .filter((node) => !isResourceNode(node)),
   );
@@ -87,12 +99,16 @@ function collectRelationshipCandidates(graph: GraphDatabase, plan: ContextQueryP
   }
 
   return uniqueNodes(
-    [...plan.symbolTerms, ...plan.fieldTerms, ...plan.textTerms]
+    [...plan.symbolTerms, ...plan.fieldTerms, ...textRecallTerms(plan)]
       .flatMap((term) => searchNodes(graph, term, SYMBOL_TERM_LIMIT)),
   );
 }
 
 function collectFallbackTextCandidates(graph: GraphDatabase, plan: ContextQueryPlan): GraphNode[] {
+  if (!plan.allowFallbackText) {
+    return [];
+  }
+
   return uniqueNodes([
     ...searchNodes(graph, plan.rawQuery, FALLBACK_TEXT_LIMIT),
     ...plan.textTerms.flatMap((term) => searchNodes(graph, term, FALLBACK_TEXT_LIMIT)),
@@ -109,6 +125,15 @@ function nodeMatchesPathAnchor(node: GraphNode, anchor: string): boolean {
   ].some((path) => path === anchor);
 }
 
+function nodeMatchesResourceNameAnchor(node: GraphNode, anchor: string): boolean {
+  const stem = pathStem(node.filePath ?? node.name);
+  return node.name === anchor ||
+    node.name === `${anchor}.tres` ||
+    node.qualifiedName.endsWith(`/${anchor}.tres`) ||
+    stem === anchor ||
+    node.id.includes(`/${anchor}.`);
+}
+
 function nodeMatchesExactTerm(node: GraphNode, term: string): boolean {
   return node.name === term ||
     node.qualifiedName === term ||
@@ -118,6 +143,15 @@ function nodeMatchesExactTerm(node: GraphNode, term: string): boolean {
 
 function isResourceNode(node: GraphNode): boolean {
   return node.kind === "resource";
+}
+
+function textRecallTerms(plan: ContextQueryPlan): string[] {
+  return plan.allowFallbackText ? plan.textTerms : [];
+}
+
+function pathStem(path: string): string {
+  const basename = path.split("/").at(-1) ?? path;
+  return basename.replace(/\.(?:tres|res|tscn|gd)$/i, "");
 }
 
 function uniqueNodes(nodes: GraphNode[]): GraphNode[] {

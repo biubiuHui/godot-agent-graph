@@ -36,6 +36,7 @@ function makeNode(
 function emptyPools(overrides: Partial<ContextCandidatePools> = {}): ContextCandidatePools {
   return {
     exactPath: [],
+    exactResourceName: [],
     resourcePath: [],
     resourceMetadata: [],
     symbolExact: [],
@@ -171,6 +172,90 @@ describe("ranked context seed selection", () => {
     ]);
   });
 
+  it("selects explicit resource-name candidates before broad directory resources", () => {
+    const plan = buildQueryPlan(
+      "fixture_item_alpha_001 fixture_item_beta_002 resources/items FixtureItemData display_name description",
+    );
+    const alpha = makeNode(
+      "resource:res://resources/items/fixture_item_alpha_001.tres",
+      "resource",
+      "fixture_item_alpha_001.tres",
+      "res://resources/items/fixture_item_alpha_001.tres",
+    );
+    const beta = makeNode(
+      "resource:res://resources/items/fixture_item_beta_002.tres",
+      "resource",
+      "fixture_item_beta_002.tres",
+      "res://resources/items/fixture_item_beta_002.tres",
+    );
+    const broadResources = Array.from({ length: 12 }, (_, index) =>
+      makeNode(
+        `resource:res://resources/items/basic_noise_${String(index).padStart(2, "0")}.tres`,
+        "resource",
+        `basic_noise_${String(index).padStart(2, "0")}.tres`,
+        `res://resources/items/basic_noise_${String(index).padStart(2, "0")}.tres`,
+      )
+    );
+
+    const selection = selectRankedSeeds(
+      plan,
+      emptyPools({
+        exactResourceName: [alpha, beta],
+        resourcePath: [...broadResources, alpha, beta],
+      }),
+      null,
+    );
+
+    expect(selection.strategy).toBe("resource-first");
+    expect(selection.seeds.slice(0, 2).map((node) => node.filePath)).toEqual([
+      "res://resources/items/fixture_item_alpha_001.tres",
+      "res://resources/items/fixture_item_beta_002.tres",
+    ]);
+  });
+
+  it("keeps resource-name anchored resource selection inside anchored files", () => {
+    const plan = buildQueryPlan(
+      "FixturePoolData FixturePoolEntryData sample_pool_primary weight payload_id sample_pool entry",
+    );
+    const primary = makeNode(
+      "resource:res://resources/pools/sample_pool_primary.tres",
+      "resource",
+      "sample_pool_primary.tres",
+      "res://resources/pools/sample_pool_primary.tres",
+    );
+    const primaryEntry = makeNode(
+      "resource:res://resources/pools/sample_pool_primary.tres#entry_0",
+      "resource",
+      "entry_0",
+      "res://resources/pools/sample_pool_primary.tres",
+      {
+        addressKind: "resource_subresource",
+        qualifiedName: "res://resources/pools/sample_pool_primary.tres#entry_0",
+      },
+    );
+    const secondary = makeNode(
+      "resource:res://resources/pools/sample_pool_secondary.tres",
+      "resource",
+      "sample_pool_secondary.tres",
+      "res://resources/pools/sample_pool_secondary.tres",
+    );
+
+    const selection = selectRankedSeeds(
+      plan,
+      emptyPools({
+        exactResourceName: [primary],
+        resourceMetadata: [secondary, primaryEntry],
+        resourcePath: [secondary, primary],
+      }),
+      null,
+    );
+
+    expect(selection.seeds.map((node) => node.id)).toEqual([
+      primary.id,
+      primaryEntry.id,
+    ]);
+  });
+
   it("selects exact code symbols before resource metadata for symbol-first queries", () => {
     const plan = buildQueryPlan("FixtureActor apply_damage");
     const script = makeNode(
@@ -207,6 +292,36 @@ describe("ranked context seed selection", () => {
       "method:res://scripts/fixture_actor.gd:apply_damage",
       "resource:res://resources/fixture_actor_stats.tres",
     ]);
+  });
+
+  it("returns no weak fallback seeds for missing high-specificity symbol checks", () => {
+    const plan = buildQueryPlan(
+      "definitely_missing_fixture_symbol_20260625 qqqq_never_fixture_symbol_abcxyz",
+    );
+    const weakTestNode = makeNode(
+      "script:res://tests/missing_fixture_test.gd",
+      "script_class",
+      "MissingFixtureTest",
+      "res://tests/missing_fixture_test.gd",
+    );
+    const weakHelperNode = makeNode(
+      "method:res://scripts/unique_fixture_helper.gd:_add_unique_fixture",
+      "method",
+      "_add_unique_fixture",
+      "res://scripts/unique_fixture_helper.gd",
+    );
+
+    const selection = selectRankedSeeds(
+      plan,
+      emptyPools({
+        fallbackText: [weakTestNode, weakHelperNode],
+      }),
+      null,
+    );
+
+    expect(plan.allowFallbackText).toBe(false);
+    expect(selection.strategy).toBe("symbol-first");
+    expect(selection.seeds).toEqual([]);
   });
 
   it("keeps exact symbol queries from seeding broad text-only symbol matches", () => {

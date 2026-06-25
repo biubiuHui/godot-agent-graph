@@ -185,6 +185,75 @@ describe("context candidate pools", () => {
     }
   });
 
+  it("recalls exact resource-name candidates separately from broad directory candidates", () => {
+    const graph = createTempGraph();
+    try {
+      for (let index = 0; index < 20; index += 1) {
+        addResource(graph, `res://resources/items/basic_noise_${String(index).padStart(2, "0")}.tres`, {
+          display_name: "Basic sample",
+          description: "Generic fixture item",
+        });
+      }
+      addResource(graph, "res://resources/items/fixture_item_alpha_001.tres", {
+        display_name: "Alpha sample",
+        description: "Explicit fixture item",
+      });
+      addResource(graph, "res://resources/items/fixture_item_beta_002.tres", {
+        display_name: "Beta sample",
+        description: "Explicit fixture item",
+      });
+
+      const plan = buildQueryPlan(
+        "fixture_item_alpha_001 fixture_item_beta_002 resources/items FixtureItemData display_name description",
+      );
+      const pools = collectCandidatePools(graph, plan);
+
+      expect(pools.exactResourceName.map((node) => node.filePath)).toEqual(
+        expect.arrayContaining([
+          "res://resources/items/fixture_item_alpha_001.tres",
+          "res://resources/items/fixture_item_beta_002.tres",
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps fallback text empty for missing high-specificity queries", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://tests/missing_fixture_test.gd");
+      addNode(
+        graph,
+        "script:res://tests/missing_fixture_test.gd",
+        "script_class",
+        "MissingFixtureTest",
+        "MissingFixtureTest",
+        "res://tests/missing_fixture_test.gd",
+      );
+      addFile(graph, "res://scripts/unique_fixture_helper.gd");
+      addNode(
+        graph,
+        "method:res://scripts/unique_fixture_helper.gd:_add_unique_fixture",
+        "method",
+        "_add_unique_fixture",
+        "FixtureUniqueHelper._add_unique_fixture",
+        "res://scripts/unique_fixture_helper.gd",
+      );
+
+      const plan = buildQueryPlan(
+        "definitely_missing_fixture_symbol_20260625 qqqq_never_fixture_symbol_abcxyz",
+      );
+      const pools = collectCandidatePools(graph, plan);
+
+      expect(plan.allowFallbackText).toBe(false);
+      expect(pools.symbolText).toEqual([]);
+      expect(pools.fallbackText).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
   it("keeps resource-only pools empty for symbol queries without resource anchors", () => {
     const graph = createTempGraph();
     try {

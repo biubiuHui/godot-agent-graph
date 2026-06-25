@@ -6,6 +6,9 @@ export interface ContextQueryPlan {
   exactTerms: string[];
   resourcePathAnchors: string[];
   resourceDirectoryAnchors: string[];
+  resourceNameAnchors: string[];
+  opaqueTerms: string[];
+  allowFallbackText: boolean;
   symbolTerms: string[];
   fieldTerms: string[];
   textTerms: string[];
@@ -15,21 +18,39 @@ export function buildQueryPlan(query: string): ContextQueryPlan {
   const resourcePathAnchors = extractResourcePathAnchors(query);
   const resourceDirectoryAnchors = extractResourceDirectoryAnchors(query, resourcePathAnchors);
   const identifierTerms = extractIdentifierTerms(query);
-  const fieldTerms = identifierTerms.filter((term) => term.includes("_"));
+  const strategy = inferContextStrategy(query);
+  const resourceNameAnchors = extractResourceNameAnchors(identifierTerms);
+  const opaqueTerms = extractOpaqueTerms(identifierTerms);
+  const fieldTerms = identifierTerms.filter(isFieldTerm);
   const symbolTerms = identifierTerms.filter((term) => /^[A-Z]/.test(term));
   const textTerms = extractNormalizedTextTerms(query);
 
   return {
     rawQuery: query,
-    strategy: inferContextStrategy(query),
+    strategy,
     exactTerms: uniqueStrings([...resourcePathAnchors, ...identifierTerms]),
     resourcePathAnchors,
     resourceDirectoryAnchors,
+    resourceNameAnchors,
+    opaqueTerms,
+    allowFallbackText: shouldAllowFallbackText(strategy, opaqueTerms, resourceDirectoryAnchors),
     symbolTerms,
     fieldTerms,
     textTerms,
   };
 }
+
+const RESOURCE_FIELD_TERMS = new Set([
+  "display_name",
+  "display_label",
+  "description",
+  "payload_id",
+  "base_weight",
+  "weight_keys",
+  "group_keys",
+  "metadata",
+  "resources",
+]);
 
 function inferContextStrategy(query: string): ContextStrategy {
   if (/\b(dependents?|dependencies|references?|refs?|callers?|callees?|impact)\b/i.test(query)) {
@@ -73,6 +94,43 @@ function extractResourceDirectoryAnchors(query: string, resourcePathAnchors: str
 
 function extractIdentifierTerms(query: string): string[] {
   return uniqueStrings(query.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []);
+}
+
+function extractResourceNameAnchors(identifierTerms: string[]): string[] {
+  return uniqueStrings(identifierTerms.filter(isResourceNameAnchor));
+}
+
+function extractOpaqueTerms(identifierTerms: string[]): string[] {
+  return uniqueStrings(
+    identifierTerms.filter((term) =>
+      isResourceNameAnchor(term) ||
+      /^[A-Z0-9_]{4,}$/.test(term)
+    ),
+  );
+}
+
+function shouldAllowFallbackText(
+  strategy: ContextStrategy,
+  opaqueTerms: string[],
+  resourceDirectoryAnchors: string[],
+): boolean {
+  if (opaqueTerms.length === 0) {
+    return true;
+  }
+  return strategy === "resource-first" && resourceDirectoryAnchors.length > 0;
+}
+
+function isFieldTerm(term: string): boolean {
+  return term.includes("_") || RESOURCE_FIELD_TERMS.has(term);
+}
+
+function isResourceNameAnchor(term: string): boolean {
+  if (/^[A-Z]/.test(term) || RESOURCE_FIELD_TERMS.has(term)) {
+    return false;
+  }
+
+  const underscoreCount = (term.match(/_/g) ?? []).length;
+  return (/\d/.test(term) && underscoreCount >= 1) || underscoreCount >= 2;
 }
 
 function extractNormalizedTextTerms(query: string): string[] {

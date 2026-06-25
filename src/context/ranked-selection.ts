@@ -27,13 +27,13 @@ export function selectRankedSeeds(
     case "resource-first":
       return { strategy: plan.strategy, seeds: selectResourceSeeds(plan, pools) };
     case "symbol-first":
-      return { strategy: plan.strategy, seeds: selectSymbolSeeds(pools) };
+      return { strategy: plan.strategy, seeds: selectSymbolSeeds(plan, pools) };
     case "relationship":
-      return { strategy: plan.strategy, seeds: selectRelationshipSeeds(pools, snapshot) };
+      return { strategy: plan.strategy, seeds: selectRelationshipSeeds(plan, pools, snapshot) };
     case "source-oriented":
       return { strategy: plan.strategy, seeds: selectSourceSeeds(plan, pools) };
     case "general":
-      return { strategy: plan.strategy, seeds: selectGeneralSeeds(pools) };
+      return { strategy: plan.strategy, seeds: selectGeneralSeeds(plan, pools) };
   }
 }
 
@@ -42,17 +42,32 @@ function selectResourceSeeds(plan: ContextQueryPlan, pools: ContextCandidatePool
     return limitSeeds(limitResourceSeedsPerFile(pools.exactPath));
   }
 
+  if (pools.exactResourceName.length > 0) {
+    const anchoredResources = resourceCandidatesForAnchorFiles(pools.exactResourceName, [
+      ...pools.exactResourceName,
+      ...pools.resourceMetadata,
+      ...pools.resourcePath,
+    ]);
+    return limitSeeds(limitResourceSeedsPerFile(uniqueNodes([
+      ...anchoredResources,
+      ...pools.symbolExact,
+      ...sortFallbackSymbols(pools.symbolText),
+      ...sortFallbackSymbols(usableFallback(plan, pools)),
+    ])));
+  }
+
   return limitSeeds(limitResourceSeedsPerFile(uniqueNodes([
     ...pools.exactPath,
-    ...pools.resourcePath,
+    ...pools.exactResourceName,
     ...pools.resourceMetadata,
+    ...pools.resourcePath,
     ...pools.symbolExact,
     ...sortFallbackSymbols(pools.symbolText),
-    ...sortFallbackSymbols(pools.fallbackText),
+    ...sortFallbackSymbols(usableFallback(plan, pools)),
   ])));
 }
 
-function selectSymbolSeeds(pools: ContextCandidatePools): GraphNode[] {
+function selectSymbolSeeds(plan: ContextQueryPlan, pools: ContextCandidatePools): GraphNode[] {
   if (pools.symbolExact.length > 0) {
     return limitSeeds(uniqueNodes([
       ...pools.symbolExact,
@@ -63,16 +78,17 @@ function selectSymbolSeeds(pools: ContextCandidatePools): GraphNode[] {
   return limitSeeds(uniqueNodes([
     ...pools.symbolText.filter((node) => node.kind !== "resource"),
     ...pools.resourceMetadata,
-    ...pools.fallbackText,
+    ...usableFallback(plan, pools),
   ]));
 }
 
 function selectRelationshipSeeds(
+  plan: ContextQueryPlan,
   pools: ContextCandidatePools,
   snapshot: GraphSnapshot | null,
 ): GraphNode[] {
   return limitSeeds(
-    [...uniqueNodes([...pools.relationship, ...pools.symbolExact, ...pools.symbolText, ...pools.fallbackText])]
+    [...uniqueNodes([...pools.relationship, ...pools.symbolExact, ...pools.symbolText, ...usableFallback(plan, pools)])]
       .sort((left, right) =>
         relationshipEvidenceCount(snapshot, right) - relationshipEvidenceCount(snapshot, left) ||
         left.id.localeCompare(right.id)
@@ -85,8 +101,9 @@ function selectSourceSeeds(plan: ContextQueryPlan, pools: ContextCandidatePools)
     uniqueNodes([
       ...pools.symbolExact,
       ...pools.symbolText,
-      ...pools.fallbackText,
+      ...usableFallback(plan, pools),
       ...pools.exactPath,
+      ...pools.exactResourceName,
       ...pools.resourcePath,
       ...pools.resourceMetadata,
     ]).sort((left, right) =>
@@ -96,14 +113,27 @@ function selectSourceSeeds(plan: ContextQueryPlan, pools: ContextCandidatePools)
   );
 }
 
-function selectGeneralSeeds(pools: ContextCandidatePools): GraphNode[] {
+function selectGeneralSeeds(plan: ContextQueryPlan, pools: ContextCandidatePools): GraphNode[] {
   return limitSeeds(uniqueNodes([
     ...pools.symbolExact,
     ...pools.resourcePath,
     ...pools.resourceMetadata,
     ...pools.symbolText,
-    ...pools.fallbackText,
+    ...usableFallback(plan, pools),
   ]));
+}
+
+function usableFallback(plan: ContextQueryPlan, pools: ContextCandidatePools): GraphNode[] {
+  return plan.allowFallbackText ? pools.fallbackText : [];
+}
+
+function resourceCandidatesForAnchorFiles(anchorNodes: GraphNode[], candidates: GraphNode[]): GraphNode[] {
+  const anchorFiles = new Set(anchorNodes.map((node) => node.filePath).filter((path): path is string => Boolean(path)));
+  return candidates.filter((node) =>
+    node.kind === "resource" &&
+    node.filePath !== null &&
+    anchorFiles.has(node.filePath)
+  );
 }
 
 function sortFallbackSymbols(nodes: GraphNode[]): GraphNode[] {

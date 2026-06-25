@@ -33,6 +33,38 @@ describe("context query planning", () => {
     expect(plan.fieldTerms).toEqual(expect.arrayContaining(["payload_id", "base_weight"]));
   });
 
+  it("extracts resource-name anchors from high-specificity resource ids", () => {
+    const plan = buildQueryPlan(
+      "fixture_item_alpha_001 fixture_item_beta_002 resources/items FixtureItemData display_name description",
+    );
+
+    expect(plan.strategy).toBe("resource-first");
+    expect(plan.resourceNameAnchors).toEqual([
+      "fixture_item_alpha_001",
+      "fixture_item_beta_002",
+    ]);
+    expect(plan.fieldTerms).toEqual(expect.arrayContaining(["display_name", "description"]));
+  });
+
+  it("disables fallback text for exact missing high-specificity checks", () => {
+    const plan = buildQueryPlan(
+      "definitely_missing_fixture_symbol_20260625 qqqq_never_fixture_symbol_abcxyz",
+    );
+
+    expect(plan.opaqueTerms).toEqual(expect.arrayContaining([
+      "definitely_missing_fixture_symbol_20260625",
+      "qqqq_never_fixture_symbol_abcxyz",
+    ]));
+    expect(plan.allowFallbackText).toBe(false);
+  });
+
+  it("keeps fallback text enabled for ordinary broad exploration", () => {
+    const plan = buildQueryPlan("damage");
+
+    expect(plan.strategy).toBe("general");
+    expect(plan.allowFallbackText).toBe(true);
+  });
+
   it("keeps relationship and source-oriented intent ahead of resource terms", () => {
     expect(buildQueryPlan("dependents FixtureActor resources/items").strategy).toBe("relationship");
     expect(buildQueryPlan("source res://scripts/fixture_actor.gd").strategy).toBe("source-oriented");

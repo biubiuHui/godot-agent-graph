@@ -470,6 +470,191 @@ describe("agent context queries", () => {
     }
   });
 
+  it("keeps explicitly named resource files ahead of broad directory matches", () => {
+    const graph = createTempGraph();
+    try {
+      function insertResource(path: string, properties: Record<string, unknown>): void {
+        addFile(graph, path, "resource");
+        addNode(
+          graph,
+          `resource:${path}`,
+          "resource",
+          path.split("/").at(-1) ?? path,
+          path,
+          path,
+          {
+            properties,
+            type: "FixtureItemData",
+          },
+          {
+            addressKind: "resource_main",
+            ownerPath: path,
+            readablePath: path,
+            displayPath: path,
+            referencePath: null,
+          },
+        );
+      }
+
+      for (let index = 0; index < 20; index += 1) {
+        insertResource(`res://resources/items/basic_noise_${String(index).padStart(2, "0")}.tres`, {
+          display_name: "Basic sample",
+          description: "Generic fixture item",
+        });
+      }
+
+      const alphaPath = "res://resources/items/fixture_item_alpha_001.tres";
+      const betaPath = "res://resources/items/fixture_item_beta_002.tres";
+      insertResource(alphaPath, {
+        display_name: "Alpha sample",
+        description: "Explicit fixture item",
+      });
+      insertResource(betaPath, {
+        display_name: "Beta sample",
+        description: "Explicit fixture item",
+      });
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "fixture_item_alpha_001 fixture_item_beta_002 resources/items FixtureItemData display_name description",
+        includeCode: false,
+        maxFiles: 6,
+      });
+
+      expect(context.strategy).toBe("resource-first");
+      expect(context.files.slice(0, 2)).toEqual(expect.arrayContaining([alphaPath, betaPath]));
+      expect(context.entryPoints.slice(0, 2)).toEqual(
+        expect.arrayContaining([`resource:${alphaPath}`, `resource:${betaPath}`]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("keeps resource-name pool queries anchored to the named pool file", () => {
+    const graph = createTempGraph();
+    try {
+      function insertPool(path: string, entryPrefix: string): void {
+        addFile(graph, path, "resource");
+        addNode(
+          graph,
+          `resource:${path}`,
+          "resource",
+          path.split("/").at(-1) ?? path,
+          path,
+          path,
+          {
+            properties: {
+              entry_type: "FixturePoolEntryData",
+            },
+            type: "FixturePoolData",
+          },
+          {
+            addressKind: "resource_main",
+            ownerPath: path,
+            readablePath: path,
+            displayPath: path,
+            referencePath: null,
+          },
+        );
+        for (let index = 0; index < 3; index += 1) {
+          const entryId = `resource:${path}#${entryPrefix}_${index}`;
+          addNode(
+            graph,
+            entryId,
+            "resource",
+            `${entryPrefix}_${index}`,
+            `${path}#${entryPrefix}_${index}`,
+            path,
+            {
+              properties: {
+                payload_id: `${entryPrefix}_payload_${index}`,
+                weight: index + 1,
+              },
+              type: "FixturePoolEntryData",
+            },
+            {
+              addressKind: "resource_subresource",
+              ownerPath: path,
+              readablePath: null,
+              displayPath: path,
+              referencePath: null,
+            },
+          );
+          addEdge(graph, `resource:${path}`, "contains", entryId);
+        }
+      }
+
+      const primaryPath = "res://resources/pools/sample_pool_primary.tres";
+      const secondaryPath = "res://resources/pools/sample_pool_secondary.tres";
+      insertPool(primaryPath, "primary_entry");
+      insertPool(secondaryPath, "secondary_entry");
+      for (let index = 0; index < 6; index += 1) {
+        insertPool(`res://resources/pools/sample_pool_noise_${index}.tres`, `noise_entry_${index}`);
+      }
+      addFile(graph, "res://scripts/pool_profile_panel.gd");
+      addNode(
+        graph,
+        "script:res://scripts/pool_profile_panel.gd",
+        "script_class",
+        "PoolProfilePanel",
+        "PoolProfilePanel",
+        "res://scripts/pool_profile_panel.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "FixturePoolData FixturePoolEntryData sample_pool_primary weight payload_id sample_pool entry",
+        includeCode: false,
+        maxFiles: 6,
+      });
+
+      expect(context.strategy).toBe("resource-first");
+      expect(context.files[0]).toBe(primaryPath);
+      expect(context.files).not.toContain(secondaryPath);
+      expect(context.files).not.toEqual(expect.arrayContaining([expect.stringContaining("sample_pool_noise_")]));
+      expect(context.files).not.toContain("res://scripts/pool_profile_panel.gd");
+    } finally {
+      graph.close();
+    }
+  });
+
+  it("returns empty context for missing high-specificity symbol checks", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://tests/missing_fixture_test.gd");
+      addNode(
+        graph,
+        "script:res://tests/missing_fixture_test.gd",
+        "script_class",
+        "MissingFixtureTest",
+        "MissingFixtureTest",
+        "res://tests/missing_fixture_test.gd",
+      );
+      addFile(graph, "res://scripts/unique_fixture_helper.gd");
+      addNode(
+        graph,
+        "method:res://scripts/unique_fixture_helper.gd:_add_unique_fixture",
+        "method",
+        "_add_unique_fixture",
+        "FixtureUniqueHelper._add_unique_fixture",
+        "res://scripts/unique_fixture_helper.gd",
+      );
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "definitely_missing_fixture_symbol_20260625 qqqq_never_fixture_symbol_abcxyz",
+        includeCode: false,
+      });
+
+      expect(context.entryPoints).toEqual([]);
+      expect(context.nodes).toEqual([]);
+      expect(context.files).toEqual([]);
+    } finally {
+      graph.close();
+    }
+  });
+
   it("uses resource-first strategy and keeps resource nodes ahead of weak ui noise", () => {
     const graph = createTempGraph();
     try {
