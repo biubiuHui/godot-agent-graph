@@ -35,6 +35,34 @@ Parsers extract:
 
 Missing external resources can still appear as resource reference nodes, but they are detached from `files` so stale scene references do not break indexing.
 
+This project is still in a breaking development phase. After graph/index contract changes, discard old local graph storage before trusting query output:
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
+
+The implementation intentionally does not keep old-index migration or fallback code.
+
+## Node Address Semantics
+
+Graph node ids are storage keys, not agent-facing path contracts. Query and output code use centralized node-address helpers to decide whether a node has an indexed owner file, a readable source path, a display path, a reference path, or only an opaque selector.
+
+Agent output assigns response-local compact ids such as `n1` after selection and budgeting. Follow-up reads should expand `context.paths[pN]` and use `godot_node` with `file` plus `symbol` when possible. Raw graph ids appear only when an explicit selector is required.
+
+## Resource Roles
+
+Resource records keep an explicit role in node address metadata:
+
+| Role | Meaning |
+| --- | --- |
+| `resource_main` | Indexed `.tres`, `.res`, or scene/resource file. |
+| `resource_subresource` | Subresource owned by an indexed scene or resource file. |
+| `resource_external_ref` | Reference to another project file that may resolve to an indexed node. |
+| `resource_missing_ref` | Reference path that is missing or not indexed. |
+
+This lets resource queries rank authored resources and metadata without treating missing references as readable source files.
+
 ## Resolver
 
 The resolver turns extracted unresolved references into graph edges when project-local targets can be found. It resolves:
@@ -54,7 +82,7 @@ The resolver turns extracted unresolved references into graph edges when project
 
 The watcher only discovers file changes, records pending files, and debounces the same sync path. Sync remains the source of truth because watcher events can be coalesced, duplicated, dropped, disabled, or platform-specific.
 
-Graph writes use a `.gdgraph/graph.lock` file to prevent concurrent sync/index writes.
+Graph writes use a small same-process write coordinator plus a `.gdgraph/graph.lock` file. The coordinator keeps startup sync, watcher sync, and manual `godot_sync` calls from colliding inside one process; the lock remains the cross-process guard. Lock responses are compact retry payloads.
 
 ## Query Layer
 
@@ -67,6 +95,22 @@ Graph query APIs power both CLI and MCP:
 - resource-aware search over `.tres` path fragments, property names, and primitive metadata values
 
 The public query model is intentionally small: `status`, `sync`, `context`, and `node`. Scene, resource, signal, autoload, node-path, call, and symbol-reference data remain indexed graph capabilities, but old standalone query products are not part of the current API surface.
+
+`godot_context` chooses one fixed internal strategy for a query:
+
+| Strategy | Use |
+| --- | --- |
+| `resource-first` | Resource paths, `.tres`/`.tscn` terms, exported property names, and metadata values. |
+| `symbol-first` | Classes, methods, constants, properties, and signal names. |
+| `relationship` | Dependents, dependencies, callers, callees, references, and impact-style questions. |
+| `source-oriented` | Exact file/source-window follow-ups. |
+| `general` | Mixed navigation when no narrower strategy fits. |
+
+The strategy is returned as metadata so an agent can interpret ranking. It is not a user profile or plugin system.
+
+Relationship output is bounded. `godot_context.completeness` and `godot_node.notes.complete` tell the agent whether a result is complete; omitted counts alone are not proof of exhaustiveness.
+
+`godot_node` is the focused source read path. Use `includeNotes: false` when the agent needs source text without relationship summaries.
 
 ## MCP Server
 

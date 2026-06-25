@@ -18,6 +18,13 @@ After the package is published to npm, this can be replaced with:
 npm install -g godot-agent-graph
 ```
 
+After updating a development build that changes the graph/index contract, rebuild each local project graph explicitly:
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
+
 ```bash
 gdgraph install /path/to/godot/project
 gdgraph uninstall /path/to/godot/project
@@ -91,6 +98,7 @@ For Codex, install also manages a short project `AGENTS.md` block:
 - Prefer `godot_node({ file, symbol })` by expanding `context.paths[pN]` and using the node `name` or `qname`.
 - For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
 - Compact `paths`, `selectors`, and node ids come only from visible budgeted output; omitted content leaves no aliases behind.
+- Treat `strategy`, `completeness`, `notes.complete`, and `notes.omitted` as bounded-output signals, not proof unless complete.
 - If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 <!-- godot-agent-graph:end codex-instructions -->
 ```

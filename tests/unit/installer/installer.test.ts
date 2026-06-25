@@ -95,6 +95,7 @@ Keep this line.
 - If the skill is unavailable, call \`godot_context\` before broad file search, then use \`godot_node\` for indexed source reads.
 - Prefer \`godot_node({ file, symbol })\` by expanding \`context.paths[pN]\` and using the node \`name\` or \`qname\`.
 - For focused source slices, pass \`includeNotes: false\` to \`godot_node\` unless relationship notes are needed.
+- Treat \`strategy\`, \`completeness\`, \`notes.complete\`, and \`notes.omitted\` as bounded-output signals, not proof unless complete.
 - If the graph is missing or stale, run \`godot_sync\` or \`gdgraph sync <project>\`.
 <!-- godot-agent-graph:end codex-instructions -->
 `);

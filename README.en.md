@@ -41,6 +41,13 @@ npm run build
 npm install -g .
 ```
 
+If the update includes a graph/index contract change, regenerate each local Godot project graph after updating the tool:
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
+
 ## Index A Project
 
 Pass the Godot project root, the directory that contains `project.godot`:
@@ -127,6 +134,10 @@ For focused source slices, pass `includeNotes: false` to `godot_node` so relatio
 
 Write `godot_context.query` as a short keyword and identifier query, not a natural-language task. Prefer exact class names, methods, constants, fields, resource paths, file/path fragments, and domain nouns.
 
+`godot_context` returns `strategy` and `completeness`. Use them to tell whether the response was resource-first, symbol-first, relationship-focused, source-oriented, or general navigation; `completeness.complete: false` means the result is bounded navigation, not a full proof chain.
+
+`godot_node` relationship notes use `notes.complete` and `notes.omitted` for completeness. For source-only reads, pass `includeNotes: false` so relationship summaries do not crowd out source.
+
 For resource-heavy questions, include path fragments such as `resources/definitions` plus `.tres` property names or string values. Resource metadata participates in graph search, but `godot_context` is still a bounded navigation result, not a complete resource audit.
 
 Good:
@@ -153,6 +164,7 @@ This project uses `gdgraph` for indexed Godot structure.
 - For Godot scripts, scenes, resources, signals, node paths, or call chains, use the `godot-graph-navigation` skill when available.
 - If the skill is unavailable, call `godot_context` before broad file search, then use `godot_node` for indexed source reads.
 - For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
+- Treat `strategy`, `completeness`, `notes.complete`, and `notes.omitted` as bounded-output signals, not proof unless complete.
 - If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 ```
 
@@ -201,6 +213,8 @@ flowchart LR
 `gdgraph sync` is incremental after the first index: it updates changed Godot files, removes deleted file records, and recomputes resolver-owned relationships without rewriting unchanged indexed files. `gdgraph sync --rebuild` removes `.gdgraph` first, then performs a fresh full index. Sync output reports change counts and omits path lists and local database paths by default to keep CLI and agent context compact.
 
 `gdgraph serve --mcp` runs a catch-up sync on startup when possible. While the MCP server is running, the watcher records Godot file changes and debounces the same incremental sync path. If the watcher is disabled or degraded, graph queries report compact stale metadata; use `godot_status` for the full pending file list, then call `godot_sync` or `gdgraph sync`.
+
+When startup sync, watcher sync, and manual sync collide inside one process, gdgraph returns a compact graph-write retry payload. Cross-process writes are still protected by the local graph lock.
 
 ## Limits
 

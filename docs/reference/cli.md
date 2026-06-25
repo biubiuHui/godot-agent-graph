@@ -25,6 +25,13 @@ Sync is incremental after the first index: it parses added and modified Godot fi
 
 Use `--rebuild` to remove the existing `.gdgraph` directory before syncing. This performs a fresh full index through the same sync pipeline and returns `rebuilt: true` when the rebuild succeeds. In rebuild output, change counts describe files inserted into the new graph index, not Git status.
 
+After a breaking development-phase graph/index upgrade or a suspected schema mismatch, use the explicit clean/sync recovery path:
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
+
 The result includes `addedCount`, `modifiedCount`, `deletedCount`, `changeListsOmitted: true`, and `changeScope: "graph_index"`. Full path lists are omitted to keep CLI and agent output compact.
 
 `parseErrors` are gdgraph parser/extractor errors only. Sync output includes `parseErrorCount`, at most the first 10 parse error strings, and `parseErrorsOmitted` when more errors exist:
@@ -111,6 +118,8 @@ gdgraph serve --mcp [path]
 ```
 
 Starts the MCP stdio server. Startup performs a catch-up sync and, when possible, attaches a watcher that tracks pending files and debounces the same incremental sync path.
+
+If startup sync, watcher sync, or manual sync collide inside one process, graph writes return a compact lock payload with `lockKind: "graph_write"` and `retryAfterMs` instead of printing local graph paths.
 
 ## install
 

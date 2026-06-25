@@ -56,6 +56,8 @@ The default MCP tools are intentionally small:
 ```json
 {
   "query": "FixtureActor",
+  "strategy": "symbol-first",
+  "completeness": { "scope": "bounded_navigation", "complete": false },
   "prefixes": { "@p1": "res://scripts/ui/" },
   "paths": { "p1": "@p1/fixture_actor.gd" },
   "entryPoints": ["n1"],
@@ -89,6 +91,10 @@ The default MCP tools are intentionally small:
 Compact references are finalized only after selection and budgeting. A node, snippet, relationship endpoint, stale file, or selector that is not visible in the final payload cannot contribute a `paths`, `prefixes`, or `selectors` entry.
 
 `id` is a response-local compact node id. For follow-up source reads, expand the node `path` through `paths[pN]` and call `godot_node` with `file` plus `symbol` from the node `name` or `qname`. `selectors` appears only for nodes that cannot be identified cleanly by `file + symbol`; when needed, rebuild the raw graph id from the selector parts or use its explicit `id`.
+
+`strategy` records the fixed internal query strategy that ranked the response. Current values are `resource-first`, `symbol-first`, `relationship`, `source-oriented`, and `general`. This is an interpretation aid, not a user profile or output mode.
+
+`completeness` describes the scope of the returned package. `complete:false` means the response is useful navigation, not exhaustive proof; ask a narrower graph question, use `godot_node`, run a narrow `rg`, or run tests when complete coverage matters.
 
 ## Relationship Format
 
@@ -124,7 +130,7 @@ Resource nodes include `.tres` property metadata. For resource-heavy tasks, quer
 { "id": "script:res://scripts/fixture_actor.gd" }
 ```
 
-File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source. `includeNotes: false` keeps the target/source payload and omits relationship notes for focused source reads. Relationship notes are bounded; use `notes.omitted` to tell whether more relationships exist outside the response.
+File reads return a bounded line window. Symbol and graph-node reads prefer indexed `startLine` and `endLine`, so method and class queries return relevant source instead of the start of a file. `symbolsOnly: true` returns structure without source text. `includeCode: false` keeps metadata and relationship notes while omitting source. `includeNotes: false` keeps the target/source payload and omits relationship notes for focused source reads. Relationship notes are bounded; use `notes.complete` and `notes.omitted` to tell whether more relationships exist outside the response.
 
 `godot_node` output also uses compact paths and node ids:
 
@@ -134,6 +140,7 @@ File reads return a bounded line window. Symbol and graph-node reads prefer inde
   "target": { "id": "n1", "kind": "script_class", "name": "FixtureActor", "path": "p1", "line": 2 },
   "source": { "path": "p1", "start": 2, "end": 24, "text": "..." },
   "notes": {
+    "complete": true,
     "callers": [{ "id": "n2", "kind": "method", "name": "_ready", "path": "p1" }],
     "callees": [],
     "dependents": [],
@@ -143,6 +150,8 @@ File reads return a bounded line window. Symbol and graph-node reads prefer inde
   }
 }
 ```
+
+Treat notes as exhaustive only when `notes.complete` is `true`; otherwise the returned callers, callees, dependents, and dependencies are a ranked bounded summary.
 
 For constants, enums, signal names, resource paths, or string protocols, graph navigation should be followed by a narrow `rg` or test check when complete reference proof matters.
 
@@ -154,6 +163,13 @@ When `target` or `symbols[]` already expands a node, relationship notes may retu
 
 Missing-index payloads include `nextTools` guidance so agents can treat this as a normal setup step instead of a terminal query failure.
 
+After a breaking development-phase graph/index upgrade, remove the old local graph and resync:
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
+
 ## Budgets And Truncation
 
 Agent output uses hard response budgets to avoid large payloads:
@@ -163,6 +179,8 @@ Agent output uses hard response budgets to avoid large payloads:
 | `godot_context` | `4800` estimated JSON characters |
 
 When a payload exceeds its budget, lower-priority snippets are dropped first, then lower-priority relationships, then unprotected nodes. Entry points, visible relationship endpoints, and focused `pathsBetween` endpoints are protected as long as the response can still fit. The response sets `truncated: true` and increments `omitted` counts so an agent can decide whether to ask a narrower graph question.
+
+Formatter invariants reject inconsistent agent output before it reaches CLI or MCP. Compact error payloads use reasons such as `orphan_context_path`, `orphan_node_read_path`, `unresolved_relationship_source`, or `unresolved_relationship_target`; they do not include local paths, raw graph internals, or stack traces.
 
 ## Freshness Contract
 

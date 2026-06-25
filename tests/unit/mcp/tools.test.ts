@@ -81,10 +81,29 @@ describe("MCP Godot tools", () => {
     expect(instructions).toContain("godot_sync");
     expect(instructions).toContain("truncated=true");
     expect(instructions).toContain("notes.omitted");
+    expect(instructions).toContain("strategy");
+    expect(instructions).toContain("completeness");
+    expect(instructions).toContain("complete=true");
+    expect(instructions).toContain("notes.complete");
+    expect(instructions).toContain("gdgraph clean");
+    expect(instructions).toContain("gdgraph sync");
+    expect(instructions).toContain("breaking index");
     expect(instructions).toContain("For .tres resource queries");
     expect(instructions).toContain("constants, enums, signal names, resource paths, or string protocols");
     expect(instructions).toContain("terse identifier-heavy keyword queries");
     expect(instructions).toContain("Do not write natural-language task instructions");
+    expect(instructions.split("\n").length).toBeLessThanOrEqual(22);
+    for (const debugOnlyTerm of ["graphFrom", "graphTo", "filePath", "databasePath", "projectRoot"]) {
+      expect(instructions).not.toContain(debugOnlyTerm);
+    }
+    for (const localPathTerm of [
+      "/" + "Users" + "/",
+      "/" + "Volumes" + "/",
+      "/" + "private" + "/",
+      "/" + "var/folders" + "/",
+    ]) {
+      expect(instructions).not.toContain(localPathTerm);
+    }
     expect(instructions).not.toContain("godot_project_map");
     expect(instructions).not.toContain("For focused follow-up, use godot_search and godot_scene");
   });

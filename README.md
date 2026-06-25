@@ -41,6 +41,13 @@ npm run build
 npm install -g .
 ```
 
+如果更新包含图谱/索引契约变化，更新工具后对每个 Godot 项目重新生成本地图谱：
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
+
 ## 索引项目
 
 传入 Godot 项目根目录，也就是包含 `project.godot` 的目录：
@@ -127,6 +134,10 @@ gdgraph serve --mcp /path/to/godot/project
 
 `godot_context.query` 应写成短关键词/符号查询，不要写成自然语言任务。优先使用准确类名、方法名、常量名、字段名、资源路径、文件/路径片段和领域名词。
 
+`godot_context` 会返回 `strategy` 和 `completeness`。它们用于判断这次结果是资源优先、符号优先、关系摘要、源码窗口还是通用导航；`completeness.complete: false` 表示这是有边界的导航结果，不是完整证明链。
+
+`godot_node` 的关系摘要使用 `notes.complete` 和 `notes.omitted` 表示完整性。只读源码片段时传 `includeNotes: false`，避免关系摘要占用上下文。
+
 查询资源时，建议带上 `resources/definitions` 这类路径片段，以及 `.tres` 中的属性名或字符串值。资源 metadata 会参与图谱搜索，但 `godot_context` 仍然是有边界的导航结果，不是完整资源审计。
 
 推荐：
@@ -153,6 +164,7 @@ This project uses `gdgraph` for indexed Godot structure.
 - For Godot scripts, scenes, resources, signals, node paths, or call chains, use the `godot-graph-navigation` skill when available.
 - If the skill is unavailable, call `godot_context` before broad file search, then use `godot_node` for indexed source reads.
 - For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
+- Treat `strategy`, `completeness`, `notes.complete`, and `notes.omitted` as bounded-output signals, not proof unless complete.
 - If the graph is missing or stale, run `godot_sync` or `gdgraph sync <project>`.
 ```
 
@@ -201,6 +213,8 @@ flowchart LR
 第一次索引之后，`gdgraph sync` 是增量同步：它更新变化过的 Godot 文件、移除已删除文件的图谱记录，并重新计算 resolver 生成的关系，不会重写未变化的已索引文件。`gdgraph sync --rebuild` 会先删除 `.gdgraph`，再进行一次全量新索引。同步输出只报告变化数量，默认省略路径列表和本地数据库路径，避免浪费 CLI 和 agent 上下文。
 
 `gdgraph serve --mcp` 启动时会尽量先同步索引。MCP server 运行期间，watcher 会记录 Godot 文件变化，并用防抖方式触发同一条增量同步路径。如果 watcher 被禁用或降级，图谱查询会返回 compact stale 信息；需要完整 pending 文件列表时用 `godot_status`，然后再调用 `godot_sync` 或 `gdgraph sync`。
+
+启动同步、watcher 同步和手动同步在同一进程里碰撞时，会返回紧凑的 graph-write 重试信息；跨进程写入仍由本地图谱锁保护。
 
 ## 边界
 

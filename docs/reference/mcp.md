@@ -23,7 +23,16 @@ The MCP server's default visible tools are:
 
 Use `godot_context` first for ordinary Godot understanding, flow, structure, and edit-planning tasks. Use `godot_node` whenever you would otherwise read an indexed Godot file or named symbol. Do not rebuild indexed Godot structure with broad grep/read loops. Raw file reads are only for unindexed files, files listed as stale, or external validation such as compiler/test output.
 
+`godot_context` is strategy-backed internally. The response includes `strategy` so an agent can interpret ranking, but there are no user profiles, output profiles, or old tool aliases.
+
 `godot_context` does not auto-bootstrap arbitrary `projectPath` values. For a new worktree, copied project, missing `.gdgraph/graph.db`, or empty index, call `godot_sync` manually once, then retry `godot_context`. Missing-index responses include `nextTools: [{ "tool": "godot_sync", ... }]` to make this recovery path explicit.
+
+For breaking development-phase graph/index upgrades or schema-invalid local storage, clean and resync the graph:
+
+```bash
+gdgraph clean /path/to/godot/project
+gdgraph sync /path/to/godot/project
+```
 
 ## Freshness Contract
 
@@ -101,6 +110,8 @@ For `.tres` resources, include directory fragments such as `resources/definition
 ```json
 {
   "query": "FixtureActor",
+  "strategy": "symbol-first",
+  "completeness": { "scope": "bounded_navigation", "complete": false },
   "prefixes": { "@p1": "res://scripts/ui/panels/" },
   "paths": { "p1": "@p1/target_panel.gd" },
   "entryPoints": ["n1"],
@@ -145,7 +156,7 @@ For `.tres` resources, include directory fragments such as `resources/definition
 
 Use `paths` to expand compact path ids. `entryPoints` are the ranked starting nodes for the query. Exact symbols, file paths, CamelCase terms, and snake_case terms are ranked entry candidates. `pathsBetween` highlights direct graph edges between entry points when found. `blastRadius` appears only for edit/impact-style queries and gives a compact first check-file set, not a full transitive impact report. For source follow-up, expand `paths[pN]` and call `godot_node({ file, symbol })` with the node `name` or `qname`. `selectors` appears for graph-id-only targets such as scene nodes and for visible relationship endpoints outside the visible `nodes[]` list. `truncated` and `omitted` tell the agent when the response stayed within budget by dropping lower-priority entries.
 
-`truncated:true` means the response is a navigation package, not a complete proof chain. For high-risk edits that depend on complete reference coverage, follow up with `godot_node`, a narrow `rg`, or tests.
+`strategy` can be `resource-first`, `symbol-first`, `relationship`, `source-oriented`, or `general`. `completeness.complete:false` and `truncated:true` mean the response is a navigation package, not a complete proof chain. For high-risk edits that depend on complete reference coverage, follow up with `godot_node`, a narrow `rg`, or tests.
 
 Ordinary constant/property reads can appear as `references_symbol` relationships. This means "the source node names or reads the target symbol"; it is not a call edge. Ambiguous same-name symbols stay unresolved instead of being guessed.
 
@@ -189,6 +200,7 @@ Responses include concise relationship notes:
   "target": { "id": "n1", "kind": "script_class", "name": "FixtureActor", "path": "p1" },
   "source": { "path": "p1", "start": 2, "end": 24, "text": "..." },
   "notes": {
+    "complete": false,
     "callers": [{ "id": "n2", "kind": "method", "name": "_ready", "path": "p1" }],
     "callees": [],
     "dependents": [],
@@ -204,7 +216,7 @@ Responses include concise relationship notes:
 }
 ```
 
-Relationship notes are bounded summaries. Cross-file `references_symbol` evidence is prioritized ahead of local structural edges, but nonzero `notes.omitted` still means additional relationships exist outside the response. Use `includeNotes: false` for focused file-window reads where source text matters more than surrounding relationships. For constants, enums, signal names, resource paths, and string protocols, use a narrow `rg` or tests when exhaustive impact proof matters.
+Relationship notes are bounded summaries. Cross-file `references_symbol` evidence is prioritized ahead of local structural edges. `notes.complete:true` means the note set is complete for the indexed relationships considered by the tool; nonzero `notes.omitted` or `notes.complete:false` means additional relationships exist outside the response. Use `includeNotes: false` for focused file-window reads where source text matters more than surrounding relationships. For constants, enums, signal names, resource paths, and string protocols, use a narrow `rg` or tests when exhaustive impact proof matters.
 
 If a relationship note points to a node already expanded in `target` or `symbols[]`, the note may be just `{ "id": "nN" }`. Resolve that id against the expanded target or symbol entry.
 
@@ -219,6 +231,19 @@ Input:
 ```
 
 Detects added, modified, and deleted Godot files, incrementally updates the graph, clears pending files, and returns change counts plus freshness. `addedCount`, `modifiedCount`, and `deletedCount` describe graph index changes, not Git status; responses include `changeScope: "graph_index"` to make that explicit. If the graph is temporarily locked by another sync/index operation, retry `godot_sync` after the lock clears.
+
+Same-process collisions, such as startup sync and manual `godot_sync` racing inside one MCP server process, return a compact retry payload:
+
+```json
+{
+  "ok": false,
+  "reason": "locked",
+  "lockKind": "graph_write",
+  "retryAfterMs": 250
+}
+```
+
+Cross-process writes are still protected by the graph lock file.
 
 After the first index, `godot_sync` parses added and modified files, removes graph records for deleted files, and recomputes resolver-owned relationships from retained reference candidates. Unchanged indexed files are not rewritten by ordinary sync. A watcher, when active, only schedules this same sync path.
 

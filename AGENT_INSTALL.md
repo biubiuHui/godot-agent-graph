@@ -79,6 +79,13 @@ gdgraph sync "$PROJECT_ROOT"
 gdgraph status "$PROJECT_ROOT"
 ```
 
+If the tool update changes the graph/index contract or the local graph appears schema-invalid, discard the old local graph and rebuild it:
+
+```bash
+gdgraph clean "$PROJECT_ROOT"
+gdgraph sync "$PROJECT_ROOT"
+```
+
 If the index is stale later, use:
 
 ```bash
@@ -137,7 +144,7 @@ Expected:
 
 - `initialized: true`
 - `indexFresh: true`
-- context output returns compact graph nodes and paths
+- context output returns compact graph nodes, paths, `strategy`, and `completeness`
 
 After restart, ask the Agent to list or inspect MCP tools. It should expose:
 
@@ -156,7 +163,8 @@ After restart, ask the Agent to list or inspect MCP tools. It should expose:
 - Prefer `godot_node({ file, symbol })` by expanding `context.paths[pN]` and using the node `name` or `qname`.
 - For focused source slices, pass `includeNotes: false` to `godot_node` unless relationship notes are needed.
 - Compact `paths`, `selectors`, and node ids come only from visible budgeted output; omitted content leaves no aliases behind.
-- Treat truncated graph output as navigation, not exhaustive proof.
+- Treat truncated graph output and `completeness.complete: false` as navigation, not exhaustive proof.
+- Treat relationship notes as complete only when `notes.complete` is `true`; inspect `notes.omitted` before assuming coverage.
 - For constants, enums, signal names, resource paths, or string protocols, add a focused `rg` or test check when complete reference proof matters.
 
 ## Uninstall
