@@ -557,6 +557,7 @@ function rootReceiverType(
     : null;
   return parameterType ??
     localVariableType(ref, receiver, nodes, projectRoot, sourceCache) ??
+    localPreloadClassName(ref, receiver, nodes, projectRoot, sourceCache) ??
     directPropertyType(receiver, nodes);
 }
 

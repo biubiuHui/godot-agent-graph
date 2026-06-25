@@ -938,6 +938,7 @@ func after() -> void:
     const omitted = notes.omitted as Record<string, unknown>;
 
     expect(notes.limit).toBe(8);
+    expect(notes.complete).toBe(false);
     expect(omitted.dependents).toBeGreaterThan(0);
     expect(dependents).toEqual(
       expect.arrayContaining([
@@ -949,6 +950,33 @@ func after() -> void:
       ]),
     );
     expect(JSON.stringify(response)).not.toContain("filePath");
+  });
+
+  it("reports complete relationship notes for resolved symbol dependents", () => {
+    const root = copyFixture("symbol-dependents");
+    const result = indexGodotProject(root);
+    expect(result.ok).toBe(true);
+
+    const response = parseTextContent(
+      callGodotMcpTool("godot_node", {
+        projectPath: root,
+        symbol: "FixtureLimits.FIXTURE_LIMIT",
+        includeCode: false,
+      }),
+    );
+    const notes = response.notes as Record<string, unknown>;
+    const dependents = notes.dependents as Array<Record<string, unknown>>;
+
+    expect(notes.complete).toBe(true);
+    expect(dependents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "method", name: "local_limit" }),
+        expect.objectContaining({ kind: "method", name: "class_limit" }),
+        expect.objectContaining({ kind: "method", name: "preload_limit" }),
+      ]),
+    );
+    expect(JSON.stringify(response)).not.toContain("filePath");
+    expect(JSON.stringify(response)).not.toContain("graphId");
   });
 
   it("reads indexed scene node source through godot_node", () => {

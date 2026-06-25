@@ -87,6 +87,7 @@ export interface ViewFileTarget {
 }
 
 export interface ViewRelationshipNoteGroups {
+  complete: boolean;
   callers: ViewNode[];
   callees: ViewNode[];
   dependents: ViewNode[];

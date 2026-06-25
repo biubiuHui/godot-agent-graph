@@ -26,6 +26,7 @@ interface RelationshipNoteEntry {
 }
 
 interface RawRelationshipNotes {
+  complete: boolean;
   callers: GraphNode[];
   callees: GraphNode[];
   dependents: GraphNode[];
@@ -256,6 +257,7 @@ function fileTargetToViewTarget(target: FilePayloadTarget): ViewFileTarget {
 
 function relationshipNotesToView(notes: RawRelationshipNotes): ViewRelationshipNoteGroups {
   return {
+    complete: notes.complete,
     callers: notes.callers.map((node, index) => graphNodeToViewNode(node, 20 + index, false)),
     callees: notes.callees.map((node, index) => graphNodeToViewNode(node, 30 + index, false)),
     dependents: notes.dependents.map((node, index) => graphNodeToViewNode(node, 40 + index, false)),
@@ -327,6 +329,12 @@ function relationshipNotesForNodes(graph: GraphDatabase, nodes: GraphNode[]): Ra
   const dependencies = summarizeNoteEntries(notes.dependencies);
 
   return {
+    complete: notesComplete({
+      callers: callers.omitted,
+      callees: callees.omitted,
+      dependents: dependents.omitted,
+      dependencies: dependencies.omitted,
+    }),
     callers: callers.nodes,
     callees: callees.nodes,
     dependents: dependents.nodes,
@@ -339,6 +347,13 @@ function relationshipNotesForNodes(graph: GraphDatabase, nodes: GraphNode[]): Ra
       dependencies: dependencies.omitted,
     },
   };
+}
+
+function notesComplete(omitted: RawRelationshipNotes["omitted"]): boolean {
+  return omitted.callers === 0 &&
+    omitted.callees === 0 &&
+    omitted.dependents === 0 &&
+    omitted.dependencies === 0;
 }
 
 function selectedStaleFilePaths(

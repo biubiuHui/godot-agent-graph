@@ -351,6 +351,7 @@ function formatNodeReadNotes(
   expandedNodeIds: Set<string>,
 ): Record<string, unknown> {
   return {
+    complete: notes.complete,
     callers: notes.callers.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
     callees: notes.callees.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),
     dependents: notes.dependents.map((node) => formatNoteNode(node, pathRefs, nodeRefs, expandedNodeIds)),

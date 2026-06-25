@@ -411,6 +411,49 @@ func _ready() -> void:
     }
   });
 
+  it("resolves proved symbol dependents and keeps ambiguous symbol refs unresolved", () => {
+    const graph = createGraphDatabase(indexedFixture("symbol-dependents"));
+    try {
+      expect(listEdges(graph, { kind: "references_symbol" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/fixture_limits.gd:local_limit",
+            target: "property:res://scripts/fixture_limits.gd:FIXTURE_LIMIT",
+            provenance: "resolver",
+          }),
+          expect.objectContaining({
+            source: "method:res://scripts/fixture_consumer.gd:class_limit",
+            target: "property:res://scripts/fixture_limits.gd:FIXTURE_LIMIT",
+            provenance: "resolver",
+          }),
+          expect.objectContaining({
+            source: "method:res://scripts/fixture_consumer.gd:preload_limit",
+            target: "property:res://scripts/fixture_limits.gd:FIXTURE_LIMIT",
+            provenance: "resolver",
+          }),
+        ]),
+      );
+      expect(
+        listUnresolvedRefs(graph).filter(
+          (ref) =>
+            ref.referenceKind === "references_symbol" &&
+            ref.referenceName === "FIXTURE_LIMIT" &&
+            ref.fromNodeId === "method:res://scripts/fixture_consumer.gd:ambiguous_limit",
+        ),
+      ).toHaveLength(1);
+      expect(listEdges(graph, { kind: "references_symbol" })).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: "method:res://scripts/fixture_consumer.gd:ambiguous_limit",
+            target: expect.stringContaining("FIXTURE_LIMIT"),
+          }),
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
   it("resolves autoload receiver method calls before global same-name fallback", () => {
     const root = indexedFixture("minimal");
     writeFileSync(
