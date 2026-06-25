@@ -27,7 +27,10 @@ The agent-facing output is implemented in these modules:
 
 | Path | Responsibility |
 | --- | --- |
-| `src/context/explore.ts` | Selects ranked `godot_context` facts from search, graph neighbors, source snippets, path links, and optional blast-radius data. It does not create compact aliases. |
+| `src/context/query-plan.ts` | Parses a raw context query into deterministic strategy metadata, exact anchors, resource directories, symbol terms, field terms, and text terms. |
+| `src/context/candidate-pools.ts` | Collects bounded recall buckets for exact paths, resource paths, resource metadata, symbols, relationships, and fallback text. |
+| `src/context/ranked-selection.ts` | Merges candidate buckets with strategy-specific ordering, exact-path boundaries, and resource-per-file caps. |
+| `src/context/explore.ts` | Assembles selected seeds into graph neighbors, relationships, source snippets, path links, and optional blast-radius data. It does not own recall ranking or create compact aliases. |
 | `src/context/node-payload.ts` | Locates exact `godot_node` targets and source windows for files, symbols, and graph node ids. It does not own compact path or node references. |
 | `src/context/output-view.ts` | Converts selected context or node-read facts into the shared `AgentOutputView`. |
 | `src/context/output-budget.ts` | Applies count and character budgets to the view before compact references exist. |
@@ -92,7 +95,9 @@ Compact references are finalized only after selection and budgeting. A node, sni
 
 `id` is a response-local compact node id. For follow-up source reads, expand the node `path` through `paths[pN]` and call `godot_node` with `file` plus `symbol` from the node `name` or `qname`. `selectors` appears only for nodes that cannot be identified cleanly by `file + symbol`; when needed, rebuild the raw graph id from the selector parts or use its explicit `id`.
 
-`strategy` records the fixed internal query strategy that ranked the response. Current values are `resource-first`, `symbol-first`, `relationship`, `source-oriented`, and `general`. This is an interpretation aid, not a personalization or output mode.
+`strategy` records the fixed internal query strategy that ranked the response. Current values are `resource-first`, `symbol-first`, `relationship`, `source-oriented`, and `general`. This is an interpretation aid, not a personalization mode, output mode, or user-selectable profile.
+
+Context recall is split before output formatting: `QueryPlan` parses anchors and terms, `CandidatePools` collects bounded buckets, `RankedSelection` chooses seed nodes, and `explore.ts` assembles graph context from those seeds. Output finalization only budgets and compacts the already-selected view; it does not re-rank hidden graph data.
 
 `completeness` describes the scope of the returned package. `complete:false` means the response is useful navigation, not exhaustive proof; ask a narrower graph question, use `godot_node`, run a narrow `rg`, or run tests when complete coverage matters.
 
@@ -114,7 +119,7 @@ When either side of an edge is outside the visible node set, the formatter still
 
 Write `godot_context.query` as a short keyword and identifier string. Prefer exact class names, method names, constants, fields, resource paths, file/path fragments, and domain nouns. Avoid natural-language task wording such as `find`, `include paths`, `summarize`, `relevant for`, or `tell me`.
 
-Resource nodes include `.tres` property metadata. For resource-heavy tasks, query with path fragments and concrete property names or literal values. Treat returned resource matches as ranked navigation evidence, not proof that every matching resource has been listed.
+Resource nodes include `.tres` property metadata. For resource-heavy tasks, query with path fragments and concrete property names or literal values. Resource-first ranking prefers explicit resource anchors and authored resource metadata before weak UI, test, or topic text matches. Exact resource path queries stay anchored to that file when exact candidates exist, including same-file subresources before unrelated resources. Treat returned resource matches as ranked navigation evidence, not proof that every matching resource has been listed.
 
 `godot_node` supports three target modes:
 

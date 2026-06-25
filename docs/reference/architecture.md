@@ -106,7 +106,16 @@ The public query model is intentionally small: `status`, `sync`, `context`, and 
 | `source-oriented` | Exact file/source-window follow-ups. |
 | `general` | Mixed navigation when no narrower strategy fits. |
 
-The strategy is returned as metadata so an agent can interpret ranking. It is not a personalization or extension system.
+The strategy is returned as metadata so an agent can interpret ranking. It is not a personalization or extension system, and callers do not select a strategy mode directly.
+
+Internally, `godot_context` uses a deterministic four-stage pipeline:
+
+1. `QueryPlan` parses the raw query into strategy, exact resource paths, resource directory anchors, symbol terms, field terms, and text terms.
+2. `CandidatePools` gathers bounded graph-node buckets such as exact paths, resource-path matches, resource metadata, exact symbols, text symbols, relationship candidates, and fallback text.
+3. `RankedSelection` merges buckets with strategy-specific ordering and hard boundaries.
+4. `ContextAssembly` expands the selected seeds through graph neighbors, relationships, snippets, and compact output budgeting.
+
+Resource-first ranking keeps authored resource files ahead of weak UI, test, or topic text symbols when a query contains resource anchors or resource metadata terms. Exact resource path queries are anchored to that resource file when exact candidates exist, including same-file subresources before unrelated same-type resources.
 
 Relationship output is bounded. `godot_context.completeness` and `godot_node.notes.complete` tell the agent whether a result is complete; omitted counts alone are not proof of exhaustiveness.
 

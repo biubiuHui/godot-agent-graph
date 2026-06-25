@@ -23,7 +23,7 @@ The MCP server's default visible tools are:
 
 Use `godot_context` first for ordinary Godot understanding, flow, structure, and edit-planning tasks. Use `godot_node` whenever you would otherwise read an indexed Godot file or named symbol. Do not rebuild indexed Godot structure with broad grep/read loops. Raw file reads are only for unindexed files, files listed as stale, or external validation such as compiler/test output.
 
-`godot_context` is strategy-backed internally. The response includes `strategy` so an agent can interpret ranking, but there are no personalization modes, alternate output modes, or old tool aliases.
+`godot_context` is strategy-backed internally. The response includes `strategy` so an agent can interpret ranking, but there are no personalization modes, alternate output modes, user-selectable profiles, or old tool aliases.
 
 `godot_context` does not auto-bootstrap arbitrary `projectPath` values. For a new worktree, copied project, missing `.gdgraph/graph.db`, or empty index, call `godot_sync` manually once, then retry `godot_context`. Missing-index responses include `nextTools: [{ "tool": "godot_sync", ... }]` to make this recovery path explicit.
 
@@ -103,7 +103,7 @@ spawn_weight constants probability odds candidate_generation
 
 Avoid task-style wording such as `find`, `include paths`, `summarize`, `relevant for`, or `tell me`; those words add noise without improving graph ranking.
 
-For `.tres` resources, include directory fragments such as `resources/definitions` and metadata terms such as exported property names or literal string/number/boolean values. Resource metadata participates in search and ranking, but `godot_context` remains a bounded navigation package, not an exhaustive resource inventory.
+For `.tres` resources, include directory fragments such as `resources/definitions` and metadata terms such as exported property names or literal string/number/boolean values. Resource-first ranking prioritizes explicit resource anchors and authored resource metadata before weak UI, test, or topic text matches. If the query includes an exact resource path and exact candidates exist, the selected context stays anchored to that resource file and its same-file subresources before unrelated resources. Resource metadata participates in search and ranking, but `godot_context` remains a bounded navigation package, not an exhaustive resource inventory.
 
 `context` uses the compact agent format:
 
@@ -156,7 +156,7 @@ For `.tres` resources, include directory fragments such as `resources/definition
 
 Use `paths` to expand compact path ids. `entryPoints` are the ranked starting nodes for the query. Exact symbols, file paths, CamelCase terms, and snake_case terms are ranked entry candidates. `pathsBetween` highlights direct graph edges between entry points when found. `blastRadius` appears only for edit/impact-style queries and gives a compact first check-file set, not a full transitive impact report. For source follow-up, expand `paths[pN]` and call `godot_node({ file, symbol })` with the node `name` or `qname`. `selectors` appears for graph-id-only targets such as scene nodes and for visible relationship endpoints outside the visible `nodes[]` list. `truncated` and `omitted` tell the agent when the response stayed within budget by dropping lower-priority entries.
 
-`strategy` can be `resource-first`, `symbol-first`, `relationship`, `source-oriented`, or `general`. `completeness.complete:false` and `truncated:true` mean the response is a navigation package, not a complete proof chain. For high-risk edits that depend on complete reference coverage, follow up with `godot_node`, a narrow `rg`, or tests.
+`strategy` can be `resource-first`, `symbol-first`, `relationship`, `source-oriented`, or `general`. It is result metadata produced by the deterministic query pipeline, not an input knob. `completeness.complete:false` and `truncated:true` mean the response is a navigation package, not a complete proof chain. For high-risk edits that depend on complete reference coverage, follow up with `godot_node`, a narrow `rg`, or tests.
 
 Ordinary constant/property reads can appear as `references_symbol` relationships. This means "the source node names or reads the target symbol"; it is not a call edge. Ambiguous same-name symbols stay unresolved instead of being guessed.
 
