@@ -10,6 +10,7 @@ import { getFile, getNode, listEdges, searchNodes } from "../../../src/db/querie
 import { indexGodotProject } from "../../../src/indexer/indexer.js";
 import { syncGodotProject } from "../../../src/sync/index.js";
 import { withGraphLock } from "../../../src/sync/lock.js";
+import { runSingleFlightWrite } from "../../../src/sync/write-coordinator.js";
 
 const fixturesRoot = fileURLToPath(new URL("../../fixtures/godot", import.meta.url));
 const tempRoots: string[] = [];
@@ -331,5 +332,29 @@ run/main_scene="res://scenes/fixture_main.tscn"
         message: expect.stringContaining("temporarily locked"),
       }),
     );
+  });
+
+  it("returns a compact retry payload for same-process active graph writes", () => {
+    const root = indexedFixture("minimal");
+
+    const result = runSingleFlightWrite(
+      root,
+      () => syncGodotProject(root),
+      () => {
+        throw new Error("outer collision should not be used");
+      },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: "locked",
+        retryAfterMs: expect.any(Number),
+        lockKind: "graph_write",
+      }),
+    );
+    if (!result.ok) {
+      expect(result.message).not.toContain(root);
+    }
   });
 });

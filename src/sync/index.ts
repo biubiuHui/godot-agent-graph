@@ -7,6 +7,7 @@ import { getProjectOverview, listIndexedFiles } from "../graph/queries.js";
 import { indexGodotProjectIncremental } from "../indexer/indexer.js";
 import { scanGodotProject, type GodotProjectScanOk } from "../indexer/scan.js";
 import { GraphLockError, withGraphLock } from "./lock.js";
+import { runSingleFlightWrite } from "./write-coordinator.js";
 
 export interface SyncGodotProjectOk {
   ok: true;
@@ -77,24 +78,34 @@ export function syncGodotProject(
     };
   }
 
-  try {
-    return withGraphLock(scan.root, () => syncScannedGodotProject(scan), {
-      retryMs: options.lockRetryMs,
-      retryIntervalMs: options.lockRetryIntervalMs,
-    });
-  } catch (error) {
-    if (error instanceof GraphLockError) {
-      return {
-        ok: false,
-        projectRoot: scan.root,
-        reason: "locked",
-        retryAfterMs: GRAPH_LOCK_RETRY_AFTER_MS,
-        lockKind: "graph_write",
-        message: error.message,
-      };
-    }
-    throw error;
-  }
+  return runSingleFlightWrite(
+    scan.root,
+    () => {
+      try {
+        return withGraphLock(scan.root, () => syncScannedGodotProject(scan), {
+          retryMs: options.lockRetryMs,
+          retryIntervalMs: options.lockRetryIntervalMs,
+        });
+      } catch (error) {
+        if (error instanceof GraphLockError) {
+          return graphWriteLockedPayload(scan.root, error.message);
+        }
+        throw error;
+      }
+    },
+    () => graphWriteLockedPayload(scan.root, "A graph write is already active in this process. Retry shortly."),
+  );
+}
+
+function graphWriteLockedPayload(projectRoot: string, message: string): SyncGodotProjectError {
+  return {
+    ok: false,
+    projectRoot,
+    reason: "locked",
+    retryAfterMs: GRAPH_LOCK_RETRY_AFTER_MS,
+    lockKind: "graph_write",
+    message,
+  };
 }
 
 function syncScannedGodotProject(scan: GodotProjectScanOk): SyncGodotProjectResult {
