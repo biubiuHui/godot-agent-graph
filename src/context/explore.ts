@@ -55,6 +55,7 @@ export interface AgentBlastRadius {
 interface ContextSeedSelection {
   strategy: ContextStrategy;
   seeds: GraphNode[];
+  resourceAnchorFiles: string[];
 }
 
 export interface AgentNodeSummary {
@@ -97,30 +98,43 @@ function contextFromSeeds(
   const related: GraphNode[] = [...seeds];
   const relationships: string[] = [];
   const entryPointIds = new Set(seeds.map((seed) => seed.id));
+  const resourceAnchorFiles = new Set(selection.resourceAnchorFiles);
   const pathsBetween = focusedPathsBetween(snapshot, entryPointIds);
 
   for (const seed of seeds) {
     for (const edge of [...incomingEdges(snapshot, seed.id), ...outgoingEdges(snapshot, seed.id)]) {
-      relationships.push(explainEdge(edge));
       const otherId = edge.source === seed.id ? edge.target : edge.source;
       const other = snapshot.nodes.find((node) => node.id === otherId);
-      if (other) {
+      if (other && shouldIncludeAnchoredRelatedNode(resourceAnchorFiles, other)) {
+        relationships.push(explainEdge(edge));
         related.push(other);
       }
     }
     for (const ref of refsFrom(snapshot, seed.id)) {
       relationships.push(explainUnresolvedRef(ref));
     }
-    for (const ref of reverseUnresolvedRefsForSeed(snapshot, seed)) {
-      relationships.push(explainUnresolvedRef(ref));
-      const source = snapshot.nodes.find((node) => node.id === ref.fromNodeId);
-      if (source) {
-        related.push(source);
+    if (resourceAnchorFiles.size === 0) {
+      for (const ref of reverseUnresolvedRefsForSeed(snapshot, seed)) {
+        relationships.push(explainUnresolvedRef(ref));
+        const source = snapshot.nodes.find((node) => node.id === ref.fromNodeId);
+        if (source) {
+          related.push(source);
+        }
       }
     }
   }
 
   return finalizeContext(projectRoot, query, strategy, related, relationships, entryPointIds, pathsBetween, options);
+}
+
+function shouldIncludeAnchoredRelatedNode(resourceAnchorFiles: ReadonlySet<string>, node: GraphNode): boolean {
+  if (resourceAnchorFiles.size === 0) {
+    return true;
+  }
+  if (node.kind !== "resource") {
+    return true;
+  }
+  return node.filePath !== null && resourceAnchorFiles.has(node.filePath);
 }
 
 function reverseUnresolvedRefsForSeed(

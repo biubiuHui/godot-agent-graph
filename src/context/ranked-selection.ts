@@ -6,6 +6,7 @@ import type { GraphNode } from "../types.js";
 export interface RankedSeedSelection {
   strategy: ContextStrategy;
   seeds: GraphNode[];
+  resourceAnchorFiles: string[];
 }
 
 const MAX_CONTEXT_SEEDS = 12;
@@ -23,17 +24,23 @@ export function selectRankedSeeds(
   pools: ContextCandidatePools,
   snapshot: GraphSnapshot | null,
 ): RankedSeedSelection {
+  const resourceAnchorFiles = resourceAnchorFilesFor(plan, pools);
+
   switch (plan.strategy) {
     case "resource-first":
-      return { strategy: plan.strategy, seeds: selectResourceSeeds(plan, pools) };
+      return { strategy: plan.strategy, seeds: selectResourceSeeds(plan, pools), resourceAnchorFiles };
     case "symbol-first":
-      return { strategy: plan.strategy, seeds: selectSymbolSeeds(plan, pools) };
+      return { strategy: plan.strategy, seeds: selectSymbolSeeds(plan, pools), resourceAnchorFiles };
     case "relationship":
-      return { strategy: plan.strategy, seeds: selectRelationshipSeeds(plan, pools, snapshot) };
+      return {
+        strategy: plan.strategy,
+        seeds: selectRelationshipSeeds(plan, pools, snapshot),
+        resourceAnchorFiles,
+      };
     case "source-oriented":
-      return { strategy: plan.strategy, seeds: selectSourceSeeds(plan, pools) };
+      return { strategy: plan.strategy, seeds: selectSourceSeeds(plan, pools), resourceAnchorFiles };
     case "general":
-      return { strategy: plan.strategy, seeds: selectGeneralSeeds(plan, pools) };
+      return { strategy: plan.strategy, seeds: selectGeneralSeeds(plan, pools), resourceAnchorFiles };
   }
 }
 
@@ -136,6 +143,17 @@ function resourceCandidatesForAnchorFiles(anchorNodes: GraphNode[], candidates: 
   );
 }
 
+function resourceAnchorFilesFor(plan: ContextQueryPlan, pools: ContextCandidatePools): string[] {
+  if (plan.strategy !== "resource-first" || pools.exactResourceName.length === 0) {
+    return [];
+  }
+  return uniqueStrings(
+    pools.exactResourceName
+      .map((node) => node.filePath)
+      .filter((path): path is string => Boolean(path)),
+  );
+}
+
 function sortFallbackSymbols(nodes: GraphNode[]): GraphNode[] {
   return [...nodes].sort((left, right) =>
     fallbackSymbolPriority(left) - fallbackSymbolPriority(right) ||
@@ -209,6 +227,10 @@ function uniqueNodes(nodes: GraphNode[]): GraphNode[] {
     seen.add(node.id);
     return true;
   });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))];
 }
 
 function isLikelyUiOrTopic(node: GraphNode): boolean {

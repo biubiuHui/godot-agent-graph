@@ -254,6 +254,9 @@ describe("ranked context seed selection", () => {
       primary.id,
       primaryEntry.id,
     ]);
+    expect(selection.resourceAnchorFiles).toEqual([
+      "res://resources/pools/sample_pool_primary.tres",
+    ]);
   });
 
   it("selects exact code symbols before resource metadata for symbol-first queries", () => {

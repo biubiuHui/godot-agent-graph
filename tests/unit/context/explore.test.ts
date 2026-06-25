@@ -619,6 +619,129 @@ describe("agent context queries", () => {
     }
   });
 
+  it("does not expand anchored resource-name queries through shared resource types", () => {
+    const graph = createTempGraph();
+    try {
+      addFile(graph, "res://scripts/fixture_pool_data.gd");
+      addNode(
+        graph,
+        "script:res://scripts/fixture_pool_data.gd",
+        "script_class",
+        "FixturePoolData",
+        "FixturePoolData",
+        "res://scripts/fixture_pool_data.gd",
+      );
+      addNode(
+        graph,
+        "property:res://scripts/fixture_pool_data.gd:payload_id",
+        "property",
+        "payload_id",
+        "FixturePoolData.payload_id",
+        "res://scripts/fixture_pool_data.gd",
+      );
+
+      addFile(graph, "res://scripts/fixture_pool_entry_data.gd");
+      addNode(
+        graph,
+        "script:res://scripts/fixture_pool_entry_data.gd",
+        "script_class",
+        "FixturePoolEntryData",
+        "FixturePoolEntryData",
+        "res://scripts/fixture_pool_entry_data.gd",
+      );
+      addNode(
+        graph,
+        "property:res://scripts/fixture_pool_entry_data.gd:payload_id",
+        "property",
+        "payload_id",
+        "FixturePoolEntryData.payload_id",
+        "res://scripts/fixture_pool_entry_data.gd",
+      );
+
+      function insertPool(path: string, entryPrefix: string): void {
+        addFile(graph, path, "resource");
+        addNode(
+          graph,
+          `resource:${path}`,
+          "resource",
+          path.split("/").at(-1) ?? path,
+          path,
+          path,
+          {
+            properties: {
+              payload_id: `${entryPrefix}_main`,
+              script: "ExtResource(\"1_pool\")",
+            },
+            type: "FixturePoolData",
+          },
+          {
+            addressKind: "resource_main",
+            ownerPath: path,
+            readablePath: path,
+            displayPath: path,
+            referencePath: null,
+          },
+        );
+        addEdge(graph, `resource:${path}`, "attaches_script", "script:res://scripts/fixture_pool_data.gd");
+
+        for (let index = 0; index < 2; index += 1) {
+          const entryId = `resource:${path}#${entryPrefix}_${index}`;
+          addNode(
+            graph,
+            entryId,
+            "resource",
+            `${entryPrefix}_${index}`,
+            `${path}#${entryPrefix}_${index}`,
+            path,
+            {
+              properties: {
+                payload_id: `${entryPrefix}_payload_${index}`,
+                weight: index + 1,
+              },
+              type: "FixturePoolEntryData",
+            },
+            {
+              addressKind: "resource_subresource",
+              ownerPath: path,
+              readablePath: null,
+              displayPath: path,
+              referencePath: null,
+            },
+          );
+          addEdge(graph, `resource:${path}`, "contains", entryId);
+          addEdge(graph, entryId, "attaches_script", "script:res://scripts/fixture_pool_entry_data.gd");
+        }
+      }
+
+      const targetPath = "res://resources/pools/sample_pool_primary.tres";
+      const secondaryPath = "res://resources/pools/sample_pool_secondary.tres";
+      const configPath = "res://resources/config/sample_pool_config.tres";
+      insertPool(targetPath, "primary_entry");
+      insertPool(secondaryPath, "secondary_entry");
+      insertPool(configPath, "config_entry");
+
+      const context = exploreGodotContext(graph, {
+        projectRoot: "",
+        query: "FixturePoolData FixturePoolEntryData sample_pool_primary weight payload_id sample_pool entry",
+        includeCode: false,
+        maxFiles: 8,
+      });
+
+      expect(context.strategy).toBe("resource-first");
+      expect(context.files).toContain(targetPath);
+      expect(context.files).not.toContain(secondaryPath);
+      expect(context.files).not.toContain(configPath);
+      expect(context.relationships).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(secondaryPath),
+          expect.stringContaining(configPath),
+        ]),
+      );
+    } finally {
+      graph.close();
+    }
+  });
+
   it("returns empty context for missing high-specificity symbol checks", () => {
     const graph = createTempGraph();
     try {
