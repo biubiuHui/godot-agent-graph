@@ -151,7 +151,11 @@ function getFileNodePayload(
     };
   }
 
-  const symbols = symbolsForFile(graph, filePath);
+  const hasExplicitSourceWindow = optionalNumber(args, "offset") !== undefined ||
+    optionalNumber(args, "limit") !== undefined;
+  const symbols = symbolsOnly || !hasExplicitSourceWindow
+    ? symbolsForFile(graph, filePath)
+    : undefined;
   const fileNodes = listNodes(graph).filter((node) => node.filePath === filePath);
   return formatNodePayload({
     target: {

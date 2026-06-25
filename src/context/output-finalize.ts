@@ -2,7 +2,6 @@ import type { AgentBlastRadius } from "./explore.js";
 import {
   graphIdParts,
   relationshipEndpointIds,
-  relationshipPaths,
   type AgentOutputView,
   type NodeReadOutputView,
   type ViewNode,
@@ -184,13 +183,26 @@ function visiblePathValues(view: AgentOutputView): string[] {
     return visibleNodeReadPathValues(view);
   }
 
+  const visibleNodeIds = new Set(view.nodes.map((node) => node.graphId));
   return uniqueStrings([
     ...view.nodes.flatMap((node) => node.filePath ? [node.filePath] : []),
     ...view.snippets.map((snippet) => snippet.filePath),
-    ...view.relationships.flatMap(relationshipPaths),
-    ...view.pathsBetween.flatMap(relationshipPaths),
+    ...view.relationships.flatMap((relationship) => relationshipOutputPathValues(relationship, visibleNodeIds)),
+    ...view.pathsBetween.flatMap((relationship) => relationshipOutputPathValues(relationship, visibleNodeIds)),
     ...(view.blastRadius?.checkFiles ?? []),
   ]);
+}
+
+function relationshipOutputPathValues(relationship: ViewRelationship, visibleNodeIds: Set<string>): string[] {
+  const endpointSelectorPaths = relationshipEndpointIds([relationship])
+    .filter((endpointId) => !visibleNodeIds.has(endpointId))
+    .map((endpointId) => graphIdParts(endpointId)?.path)
+    .filter((path): path is string => Boolean(path));
+  const unresolvedTargetPath = relationship.provenance === "unresolved" && relationship.target.startsWith("res://")
+    ? [relationship.target]
+    : [];
+
+  return [...endpointSelectorPaths, ...unresolvedTargetPath];
 }
 
 function finalizeNodeReadOutput(view: NodeReadOutputView): AgentFormattedNodeRead {

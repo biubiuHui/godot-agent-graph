@@ -676,6 +676,7 @@ describe("MCP Godot tools", () => {
       }),
     );
     expect(response).not.toHaveProperty("notes");
+    expect(response).not.toHaveProperty("symbols");
     expect(JSON.stringify(response)).not.toContain("filePath");
   });
 

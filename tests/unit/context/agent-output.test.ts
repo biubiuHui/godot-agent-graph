@@ -742,4 +742,50 @@ describe("agent output formatter", () => {
       },
     ]);
   });
+
+  it("does not create orphan paths for visible graph-id resource nodes without file paths", () => {
+    const output = formatAgentContext({
+      query: "resource placeholder",
+      entryPoints: [
+        "resource:res://resources/fixture_stats.tres",
+        "resource:res://scripts/fixture_stats_data.gd",
+      ],
+      nodes: [
+        {
+          id: "resource:res://resources/fixture_stats.tres",
+          kind: "resource",
+          name: "fixture_stats.tres",
+          qualifiedName: "res://resources/fixture_stats.tres",
+          filePath: "res://resources/fixture_stats.tres",
+          startLine: 1,
+          signature: "FixtureStats",
+        },
+        {
+          id: "resource:res://scripts/fixture_stats_data.gd",
+          kind: "resource",
+          name: "fixture_stats_data.gd",
+          qualifiedName: "res://scripts/fixture_stats_data.gd",
+          filePath: null,
+          startLine: 1,
+          signature: "Script",
+        },
+      ],
+      relationships: [],
+      pathsBetween: [
+        "resource:res://resources/fixture_stats.tres loads_resource resource:res://scripts/fixture_stats_data.gd (resource-parser)",
+      ],
+      files: ["res://resources/fixture_stats.tres"],
+      snippets: [],
+    });
+
+    expect(output.pathsBetween).toEqual([
+      {
+        from: "n1",
+        kind: "loads_resource",
+        to: "n2",
+        provenance: "resource-parser",
+      },
+    ]);
+    expect(Object.values(output.paths)).toEqual(["res://resources/fixture_stats.tres"]);
+  });
 });
