@@ -2,6 +2,8 @@ import { estimatedChars, finalizeAgentOutput } from "./output-finalize.js";
 import {
   relationshipEndpointIds,
   type AgentOutputView,
+  type ViewNode,
+  type ViewOmittedNodeCategory,
   type ViewRelationship,
 } from "./output-view.js";
 
@@ -29,15 +31,23 @@ export function applyOutputBudget<T extends AgentOutputView>(
       budgeted.omitted.snippets += 1;
     } else if (removeRelationship(budgeted, false)) {
       budgeted.omitted.relationships += 1;
-    } else if (removeUnprotectedTailNode(budgeted)) {
-      budgeted.omitted.nodes += 1;
-    } else if (removeRelationship(budgeted, true)) {
-      budgeted.omitted.relationships += 1;
-    } else if (budgeted.nodes.length > 0) {
-      budgeted.nodes.pop();
-      budgeted.omitted.nodes += 1;
     } else {
-      break;
+      const removedNode = removeUnprotectedTailNode(budgeted);
+      if (!removedNode) {
+        if (removeRelationship(budgeted, true)) {
+          budgeted.omitted.relationships += 1;
+        } else {
+          const tailNode = budgeted.nodes.pop();
+          if (!tailNode) {
+            break;
+          }
+          addOmittedNodeSummary(budgeted, tailNode);
+          budgeted.omitted.nodes += 1;
+        }
+      } else {
+        addOmittedNodeSummary(budgeted, removedNode);
+        budgeted.omitted.nodes += 1;
+      }
     }
     budgeted.truncated = true;
     budgeted.budget.estimatedChars = estimateBudgetedView(budgeted);
@@ -49,7 +59,9 @@ export function applyOutputBudget<T extends AgentOutputView>(
 
 function applyCountLimits(view: AgentOutputView, options: OutputBudgetOptions): void {
   if (view.nodes.length > options.maxNodes) {
-    view.omitted.nodes += view.nodes.length - options.maxNodes;
+    const omittedNodes = view.nodes.slice(options.maxNodes);
+    addOmittedNodesSummary(view, omittedNodes);
+    view.omitted.nodes += omittedNodes.length;
     view.nodes = view.nodes.slice(0, options.maxNodes);
   }
   if (view.relationships.length > options.maxRelationships) {
@@ -74,7 +86,7 @@ function removeRelationship(view: AgentOutputView, allowProtected: boolean): boo
   return false;
 }
 
-function removeUnprotectedTailNode(view: AgentOutputView): boolean {
+function removeUnprotectedTailNode(view: AgentOutputView): ViewNode | null {
   const protectedNodeIds = protectedGraphIds(view);
   for (let index = view.nodes.length - 1; index >= 0; index -= 1) {
     const node = view.nodes[index];
@@ -82,9 +94,9 @@ function removeUnprotectedTailNode(view: AgentOutputView): boolean {
       continue;
     }
     view.nodes.splice(index, 1);
-    return true;
+    return node;
   }
-  return false;
+  return null;
 }
 
 function protectedGraphIds(view: AgentOutputView): Set<string> {
@@ -119,10 +131,54 @@ function cloneView(view: AgentOutputView): AgentOutputView {
     relationships: cloneRelationships(view.relationships),
     snippets: view.snippets.map((snippet) => ({ ...snippet })),
     omitted: { ...view.omitted },
+    omittedSummary: {
+      nodes: { ...view.omittedSummary.nodes },
+    },
     budget: { ...view.budget },
   };
 }
 
 function cloneRelationships(relationships: ViewRelationship[]): ViewRelationship[] {
   return relationships.map((relationship) => ({ ...relationship }));
+}
+
+function addOmittedNodesSummary(view: AgentOutputView, nodes: ViewNode[]): void {
+  for (const node of nodes) {
+    addOmittedNodeSummary(view, node);
+  }
+}
+
+function addOmittedNodeSummary(view: AgentOutputView, node: ViewNode): void {
+  const category = omittedNodeCategory(node);
+  view.omittedSummary.nodes[category] = (view.omittedSummary.nodes[category] ?? 0) + 1;
+}
+
+function omittedNodeCategory(node: ViewNode): ViewOmittedNodeCategory {
+  const path = [node.filePath, node.displayPath, node.ownerPath, node.readablePath]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  if (/(^|\/)tests?\//i.test(path)) {
+    return "test";
+  }
+  if (node.kind === "resource") {
+    return "resource";
+  }
+  if (node.kind === "scene" || node.kind === "scene_node") {
+    return "scene";
+  }
+  if (isScriptNodeKind(node.kind)) {
+    return "script";
+  }
+  return "other";
+}
+
+function isScriptNodeKind(kind: string): boolean {
+  return [
+    "script_class",
+    "inner_class",
+    "method",
+    "property",
+    "signal",
+    "autoload",
+  ].includes(kind);
 }

@@ -981,6 +981,7 @@ func after() -> void:
 
     expect(notes.limit).toBe(8);
     expect(notes.complete).toBe(false);
+    expect(response.resultHint).toBe("navigation_sample_not_exhaustive");
     expect(omitted.dependents).toBeGreaterThan(0);
     expect(dependents).toEqual(
       expect.arrayContaining([

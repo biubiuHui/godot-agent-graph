@@ -466,6 +466,75 @@ describe("agent output formatter", () => {
     }));
   });
 
+  it("uses a dedicated hint when context has no indexed matches", () => {
+    const output = formatAgentContext({
+      query: "definitely_missing_fixture_symbol_20260625",
+      strategy: "symbol-first",
+      completeness: {
+        scope: "bounded_navigation",
+        complete: false,
+      },
+      nodes: [],
+      relationships: [],
+      files: [],
+      snippets: [],
+    });
+
+    expect(output).toEqual(expect.objectContaining({
+      resultHint: "no_indexed_matches",
+      paths: {},
+      nodes: [],
+      relationships: [],
+      snippets: [],
+    }));
+  });
+
+  it("does not report no indexed matches when budget omitted every matched node", () => {
+    const output = formatAgentContext(
+      {
+        query: "FixtureActor",
+        strategy: "symbol-first",
+        completeness: {
+          scope: "bounded_navigation",
+          complete: false,
+        },
+        nodes: [
+          {
+            id: "script:res://scripts/fixture_actor.gd",
+            kind: "script_class",
+            name: "FixtureActor",
+            qualifiedName: "FixtureActor",
+            filePath: "res://scripts/fixture_actor.gd",
+            startLine: 1,
+            signature: "class_name FixtureActor",
+          },
+        ],
+        relationships: [],
+        files: ["res://scripts/fixture_actor.gd"],
+        snippets: [],
+      },
+      {
+        maxNodes: 0,
+        maxRelationships: 0,
+        maxSnippets: 0,
+        maxChars: 8_000,
+      },
+    );
+
+    expect(output).toEqual(expect.objectContaining({
+      resultHint: "navigation_sample_not_exhaustive",
+      nodes: [],
+      omitted: expect.objectContaining({
+        nodes: 1,
+      }),
+      omittedSummary: {
+        nodes: {
+          script: 1,
+        },
+      },
+    }));
+  });
+
   it("uses compact selectors for relationship endpoints outside visible nodes", () => {
     const output = formatAgentContext(
       {
@@ -570,6 +639,80 @@ describe("agent output formatter", () => {
       p1: "res://scripts/visible.gd",
     });
     expect(JSON.stringify(output)).not.toContain("resources/noise_");
+  });
+
+  it("summarizes omitted node categories when nodes are budgeted out", () => {
+    const output = formatAgentContext(
+      {
+        query: "VisibleResourceSceneTest",
+        nodes: [
+          {
+            id: "script:res://scripts/visible.gd",
+            kind: "script_class",
+            name: "Visible",
+            qualifiedName: "Visible",
+            filePath: "res://scripts/visible.gd",
+            startLine: 1,
+            signature: null,
+          },
+          {
+            id: "resource:res://resources/fixture_profile.tres",
+            kind: "resource",
+            name: "fixture_profile.tres",
+            qualifiedName: "res://resources/fixture_profile.tres",
+            filePath: "res://resources/fixture_profile.tres",
+            startLine: 1,
+            signature: "Resource",
+          },
+          {
+            id: "scene_node:res://scenes/fixture_scene.tscn:FixtureNode",
+            kind: "scene_node",
+            name: "FixtureNode",
+            qualifiedName: "FixtureNode",
+            filePath: "res://scenes/fixture_scene.tscn",
+            startLine: 4,
+            signature: "Node2D",
+          },
+          {
+            id: "method:res://tests/fixture_flow_test.gd:test_flow",
+            kind: "method",
+            name: "test_flow",
+            qualifiedName: "FixtureFlowTest.test_flow",
+            filePath: "res://tests/fixture_flow_test.gd",
+            startLine: 5,
+            signature: "func test_flow() -> void:",
+          },
+          {
+            id: "property:res://scripts/fixture_model.gd:fixture_value",
+            kind: "property",
+            name: "fixture_value",
+            qualifiedName: "FixtureModel.fixture_value",
+            filePath: "res://scripts/fixture_model.gd",
+            startLine: 3,
+            signature: "var fixture_value := 1",
+          },
+        ],
+        relationships: [],
+        files: ["res://scripts/visible.gd"],
+        snippets: [],
+      },
+      {
+        maxNodes: 1,
+        maxRelationships: 10,
+        maxSnippets: 10,
+        maxChars: 8_000,
+      },
+    );
+
+    expect(output.omitted.nodes).toBe(4);
+    expect(output.omittedSummary).toEqual({
+      nodes: {
+        resource: 1,
+        scene: 1,
+        test: 1,
+        script: 1,
+      },
+    });
   });
 
   it("prunes selectors and paths for relationships omitted by output limits", () => {

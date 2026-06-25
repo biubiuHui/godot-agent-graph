@@ -9,6 +9,7 @@ import {
   type NodeReadOutputView,
   type ViewNode,
   type ViewFileTarget,
+  type ViewOmittedSummary,
   type ViewRelationship,
   type ViewRelationshipNoteGroups,
 } from "./output-view.js";
@@ -38,7 +39,7 @@ export interface AgentFormattedContext {
   query: string;
   strategy?: ContextStrategy;
   completeness?: AgentContextCompleteness;
-  resultHint?: "navigation_sample_not_exhaustive";
+  resultHint?: AgentResultHint;
   prefixes?: Record<string, string>;
   paths: Record<string, string>;
   entryPoints: string[];
@@ -54,10 +55,17 @@ export interface AgentFormattedContext {
     relationships: number;
     snippets: number;
   };
+  omittedSummary?: AgentOmittedSummary;
   budget: {
     maxChars: number;
     estimatedChars: number;
   };
+}
+
+export type AgentResultHint = "navigation_sample_not_exhaustive" | "no_indexed_matches";
+
+export interface AgentOmittedSummary {
+  nodes?: Record<string, number>;
 }
 
 export interface AgentFormattedNode {
@@ -107,6 +115,7 @@ export interface AgentPathRefs {
 
 export interface AgentFormattedNodeRead {
   ok: true;
+  resultHint?: AgentResultHint;
   prefixes?: Record<string, string>;
   paths: Record<string, string>;
   target: Record<string, unknown>;
@@ -139,11 +148,13 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
     view.omitted.nodes > 0 ||
     view.omitted.relationships > 0 ||
     view.omitted.snippets > 0;
+  const resultHint = contextResultHint(view, truncated);
+  const omittedSummary = formatOmittedSummary(view.omittedSummary);
   const output: AgentFormattedContext = {
     query: view.query ?? "",
     ...(view.strategy ? { strategy: view.strategy } : {}),
     ...(view.completeness ? { completeness: view.completeness } : {}),
-    ...(isNavigationSample(view, truncated) ? { resultHint: "navigation_sample_not_exhaustive" } : {}),
+    ...(resultHint ? { resultHint } : {}),
     ...(Object.keys(pathRefs.prefixes).length > 0 ? { prefixes: pathRefs.prefixes } : {}),
     paths: pathRefs.paths,
     entryPoints: view.entryPointIds
@@ -169,6 +180,7 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
       })),
     truncated,
     omitted: { ...view.omitted },
+    ...(omittedSummary ? { omittedSummary } : {}),
     budget: {
       maxChars: view.budget.maxChars,
       estimatedChars: 0,
@@ -186,8 +198,39 @@ export function finalizeAgentOutput(view: AgentOutputView): AgentFormattedContex
   return output;
 }
 
-function isNavigationSample(view: AgentOutputView & { kind: "context" }, truncated: boolean): boolean {
-  return truncated || view.completeness?.complete === false;
+function contextResultHint(view: AgentOutputView & { kind: "context" }, truncated: boolean): AgentResultHint | null {
+  if (hasNoIndexedMatches(view)) {
+    return "no_indexed_matches";
+  }
+  return truncated || view.completeness?.complete === false
+    ? "navigation_sample_not_exhaustive"
+    : null;
+}
+
+function hasNoIndexedMatches(view: AgentOutputView & { kind: "context" }): boolean {
+  return view.nodes.length === 0 &&
+    view.relationships.length === 0 &&
+    view.pathsBetween.length === 0 &&
+    view.snippets.length === 0 &&
+    view.omitted.nodes === 0 &&
+    view.omitted.relationships === 0 &&
+    view.omitted.snippets === 0;
+}
+
+function formatOmittedSummary(summary: ViewOmittedSummary | undefined): AgentOmittedSummary | null {
+  const nodeSummary = nonzeroCounts(summary?.nodes ?? {});
+  return Object.keys(nodeSummary).length > 0
+    ? { nodes: nodeSummary }
+    : null;
+}
+
+function nonzeroCounts(counts: Record<string, number | undefined>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(counts).filter((entry): entry is [string, number] => {
+      const count = entry[1];
+      return typeof count === "number" && count > 0;
+    }),
+  );
 }
 
 export function createAgentPathRefs(rawPaths: string[]): AgentPathRefs {
@@ -250,6 +293,9 @@ function finalizeNodeReadOutput(view: NodeReadOutputView): AgentFormattedNodeRea
   ]);
   const output = removeUndefined({
     ok: true,
+    ...(view.nodeRead.notes?.complete === false
+      ? { resultHint: "navigation_sample_not_exhaustive" }
+      : {}),
     ...(Object.keys(pathRefs.prefixes).length > 0 ? { prefixes: pathRefs.prefixes } : {}),
     paths: pathRefs.paths,
     target: "graphId" in view.nodeRead.target

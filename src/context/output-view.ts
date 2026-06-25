@@ -62,6 +62,12 @@ export interface ViewOmittedCounts {
   snippets: number;
 }
 
+export type ViewOmittedNodeCategory = "resource" | "script" | "scene" | "test" | "other";
+
+export interface ViewOmittedSummary {
+  nodes: Partial<Record<ViewOmittedNodeCategory, number>>;
+}
+
 interface AgentOutputViewBase {
   kind: AgentOutputKind;
   query?: string;
@@ -75,6 +81,7 @@ interface AgentOutputViewBase {
   snippets: ViewSnippet[];
   source?: ViewSource;
   omitted: ViewOmittedCounts;
+  omittedSummary: ViewOmittedSummary;
   truncated: boolean;
   budget: ViewBudget;
 }
@@ -186,6 +193,9 @@ export function contextToOutputView(input: ContextOutputViewInput): ContextOutpu
       relationships: 0,
       snippets: 0,
     },
+    omittedSummary: {
+      nodes: {},
+    },
     truncated: false,
     budget: {
       maxChars: input.maxChars,
@@ -220,6 +230,9 @@ export function nodeReadToOutputView(input: {
       nodes: 0,
       relationships: 0,
       snippets: 0,
+    },
+    omittedSummary: {
+      nodes: {},
     },
     truncated: false,
     budget: {
