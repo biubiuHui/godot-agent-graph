@@ -240,19 +240,12 @@ npm run gdgraph -- sync tests/fixtures/godot/minimal
 npm run gdgraph -- context FixtureActor --path tests/fixtures/godot/minimal
 ```
 
-隐私检查：
-
-```bash
-npm run privacy:check
-```
-
 ## 参考文档
 
 - [CLI Reference](docs/reference/cli.md)
 - [MCP Tools Reference](docs/reference/mcp.md)
 - [Agent Output Reference](docs/reference/agent-output.md)
 - [Installer Reference](docs/reference/install.md)
-- [Privacy And Release Guardrails](docs/reference/privacy.md)
 - [Architecture](docs/reference/architecture.md)
 - [Troubleshooting](docs/reference/troubleshooting.md)
 - [Minimal Fixture Walkthrough](examples/minimal-walkthrough.md)

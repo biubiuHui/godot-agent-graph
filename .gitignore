@@ -3,6 +3,7 @@ dist/
 .gdgraph/
 docs/verification/
 coverage/
+.local/
 .DS_Store
 *.db
 *.sqlite

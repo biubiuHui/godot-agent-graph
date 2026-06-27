@@ -19,7 +19,6 @@
     "copy-assets": "node scripts/copy-assets.mjs",
     "build": "npm run clean && tsc -p tsconfig.json && npm run copy-assets",
     "gdgraph": "tsx src/bin/gdgraph.ts",
-    "privacy:check": "tsx scripts/privacy-check.ts",
     "test": "vitest run"
   },
   "dependencies": {

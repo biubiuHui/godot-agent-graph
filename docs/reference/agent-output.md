@@ -39,7 +39,7 @@ The agent-facing output is implemented in these modules:
 | `src/mcp/tools.ts` | Defines the MCP surface and adapts status, context, node, and sync payloads to compact JSON. |
 | `src/db/queries.ts` | Provides graph node/file lookup, search token handling, relationship rows, and symbol-reference data. |
 
-Public fixtures and temporary synthetic projects are used for tests. Documentation and tests must not copy private project code, private project names, absolute local paths, or private Godot assets.
+Tests use public fixtures and temporary synthetic projects.
 
 ## Tool Surface
 
@@ -193,7 +193,7 @@ Graph-backed answers include flat freshness metadata. `godot_context`, `godot_no
 
 `godot_sync` returns graph-index delta counts. `addedCount`, `modifiedCount`, and `deletedCount` describe indexed Godot files, not Git status. Path lists and local database paths are omitted by default to keep agent output compact.
 
-## Privacy And Fixture Rules
+## Fixture Rules
 
 Open-source examples must use generic names such as `FixtureActor`, `SamplePanel`, `ExampleEntry`, or temporary synthetic projects. They must not include:
 
@@ -202,5 +202,3 @@ Open-source examples must use generic names such as `FixtureActor`, `SamplePanel
 - proprietary Godot script, scene, resource, or asset content;
 - business-domain terms copied from a private game;
 - historical implementation plans that are no longer part of the maintained technical reference.
-
-Use privacy scans and hash comparison against local private project roots before publishing release artifacts or force-pushed history.
