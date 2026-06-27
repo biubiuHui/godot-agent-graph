@@ -2,6 +2,7 @@
   "name": "godot-agent-graph",
   "version": "0.1.0",
   "description": "Agent-native static knowledge graph tooling for Godot projects.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "gdgraph": "./dist/bin/gdgraph.js"
